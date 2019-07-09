@@ -54,7 +54,7 @@ calc_umap_etc <- function( samplename ) {
   ans  
 }  
   
-data <- sapply( samplenames[1:2], calc_umap_etc, simplify=FALSE )
+data <- sapply( samplenames, calc_umap_etc, simplify=FALSE )
 
 save( data, file="data.rda" )
 
@@ -62,8 +62,8 @@ add_gene <- function( gene )
 {
   for( samplename in names(data) ) {
     cat( samplename, " " )
-    data[[ samplename ]][[ paste0( "raw_", gene ) ]] <- counts[ gene, rownames(data[[samplename]]) ]
-    data[[ samplename ]][[ paste0( "smooth_", gene ) ]] <- 
+    data[[ samplename ]][[ paste0( "raw_", gene ) ]] <<- counts[ gene, rownames(data[[samplename]]) ]
+    data[[ samplename ]][[ paste0( "smooth_", gene ) ]] <<- 
        suppressWarnings(predict( locfit.raw( 
          as.matrix( data[[ samplename ]][ ,paste0( "PC", 1:15 ) ] ), 
          data[[ samplename ]][[ paste0( "raw_", gene ) ]],
@@ -78,7 +78,7 @@ add_gene( "NFU1" )
 data %>%
 bind_rows( .id="sample" ) %>%
 ggplot +
-  geom_point( aes( UMAP1, UMAP2, col=smooth_NFU1 ) ) +
+  geom_point( aes( UMAP1, UMAP2, col=smooth_SATB2 ) ) +
   coord_fixed() +
   facet_wrap( ~ sample )
 
