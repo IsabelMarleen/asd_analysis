@@ -19,12 +19,16 @@ counts <- counts[ , cellinfo$cell ]
 # Remove genes that are not seen in any cell
 counts <- counts[ rowSums(counts) > 0,  ]
 
+#Make backup of counts matrix
 counts_bak2 <- counts
 
 # Make list of sample names
 samplenames <- unique( cellinfo$sample ) 
 
-# Function to calculate PCA, UMAP, colSums  for a sample
+# sample info
+cellinfo %>% select( sample : RNA.Integrity.Number ) %>% distinct() -> sampleinfo
+
+# Function to calculate PCA, UMAP, colSums for a sample
 calc_umap_etc <- function( samplename ) {
   print( samplename )
   
@@ -53,11 +57,13 @@ calc_umap_etc <- function( samplename ) {
   
   ans  
 }  
-  
+
+#Calculate UMAP, PCA etc for all samples  
 data <- sapply( samplenames, calc_umap_etc, simplify=FALSE )
 
 save( data, file="data.rda" )
 
+#Function that adds raw and smoothed gene expression to data
 add_gene <- function( gene )
 {
   for( samplename in names(data) ) {
@@ -74,11 +80,28 @@ add_gene <- function( gene )
   
 add_gene( "SATB2" )
 add_gene( "NFU1" )
+add_gene("COX5B")
 
+#Create all UMAPs, whith the red colour channel being the SATB2 expression
+#and the green one the COXB5 expression, overlapping regions are yellow
+#No systematic difference between ASD and Control samples visible
 data %>%
-bind_rows( .id="sample" ) %>%
-ggplot +
-  geom_point( aes( UMAP1, UMAP2, col=smooth_SATB2 ) ) +
+bind_rows( .id="sample" ) %>% 
+left_join( sampleinfo ) %>%
+unite( smpl, individual, region, diagnosis ) -> a
+a %>% ggplot +
+  geom_point( aes( UMAP1, UMAP2 ), size=.3,
+     col = rgb( 
+       red = pmin( 1, a$smooth_SATB2^.15/.4), 
+       green = pmin( 1, a$smooth_COX5B^.15/.3),
+       blue = .3 ) ) +
   coord_fixed() +
-  facet_wrap( ~ sample )
+  facet_wrap( ~ smpl ) +
+  theme_dark() + theme( plot.background = element_rect(fill="black") )
 
+#Create a plot for each sample of smoothed SATB2 against NFU1
+data %>%
+  bind_rows( .id="sample" ) %>%
+  ggplot +
+  geom_point( aes( smooth_SATB2, smooth_NFU1 ), size=.3 ) +
+  facet_wrap( ~ sample )
