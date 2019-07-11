@@ -99,9 +99,90 @@ a %>% ggplot +
   facet_wrap( ~ smpl ) +
   theme_dark() + theme( plot.background = element_rect(fill="black") )
 
+
+#Create all UMAPs, whith the red colour channel being the SATB2 expression
+#and the green one the NFU1 expression, overlapping regions are yellow
+data %>%
+  bind_rows( .id="sample" ) %>% 
+  left_join( sampleinfo ) %>%
+  unite( smpl, individual, region, diagnosis ) -> a
+a %>% ggplot +
+  geom_point( aes( UMAP1, UMAP2 ), size=.3,
+              col = rgb( 
+                red = pmin( 1, a$smooth_SATB2^.15/.4), 
+                green = pmin( 1, a$smooth_NFU1^.15/.3),
+                blue = .3 ) ) +
+  coord_fixed() +
+  facet_wrap( ~ smpl ) +
+  theme_dark() + theme( plot.background = element_rect(fill="black") )
+
 #Create a plot for each sample of smoothed SATB2 against NFU1
 data %>%
   bind_rows( .id="sample" ) %>%
   ggplot +
   geom_point( aes( smooth_SATB2, smooth_NFU1 ), size=.3 ) +
   facet_wrap( ~ sample )
+
+
+
+#Not cleaned yet
+
+
+
+#Using the Multimode package to predict where the lines in the histograms need to go
+lines <- sapply( names(data), function (s) {
+  lines <- data[[s]]$smooth_SATB2
+  lines <- lines[lines<.9]
+  multimode::locmodes(lines^.15, 2 )$location
+})
+
+#modes_positions is a tibble including the positions of the three lines for each sample
+modes_positions <- lines %>% t %>% as_tibble( rownames="sample" ) %>%
+  gather( mode, pos, V1:V3 )
+
+
+
+#Use predicted lines by locfit to filter for SATB2 positive cells, including all cells
+#beyond the second peak line and 90% of cells between valley and second peak line
+
+#Creating new list
+location <- list()
+for( s in names(data) ) {
+  a <- data[[s]]$smooth_SATB2
+  a <- a[ a < .9 ]
+  location[[s]]$locmodes <- multimode::locmodes( a ^.15, 2 )$location^(1/.15)
+  location[[s]]$SATB2thresh <- location[[s]]$locmodes[2]
+}
+
+
+##Averaging genes in SATB2pos cells to compare ASD/control using t tests
+#Making sure that cellinfo has the same cells as counts
+cellinfo <- cellinfo[(cellinfo$cell) %in% colnames(counts),]
+
+avg_genes_for_SATB2pos <- function( s ) {
+  #Subsetting names of smooth SATB2 with rownames above threshhold
+  SATB2pos <- rownames(data[[s]])[ data[[s]]$smooth_SATB2 > location[[s]]$SATB2thresh ]
+  # Get fractions for these, for gene g, and take average
+  rowMeans( t( t(counts[ , SATB2pos ]) / colSums( counts[ , SATB2pos ] ) ) )
+}
+
+means_SATB2pos <- sapply( names(data), avg_genes_for_SATB2pos )
+
+diagnoses <- cellinfo %>% select( sample, diagnosis ) %>% distinct() %>% deframe() %>%
+  as.factor()
+
+stopifnot( all( names(diagnoses) == colnames(means_SATB2pos) ) )
+
+#t Test
+ttres <- genefilter::rowttests( means_SATB2pos, diagnoses )
+rownames(ttres) <- rownames(means_SATB2pos)
+
+#Multiple testing correction
+ttres$padj <- p.adjust(ttres$p.value, method="BH")
+
+ggplot( ttres ) +
+  geom_point( aes( x=log10(dm), y=-log10(p.value) ) ) +
+  scale_x_continuous( limits = c( -0.002, 0.002 ) )
+
+tibble( NFU1=means_SATB2pos["NFU1",], diagnoses ) %>% ggplot + geom_point(aes(x=1,y=NFU1, diagnoses=))
+

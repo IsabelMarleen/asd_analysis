@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1562677439370.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "702289143",
+    "id" : "B2FD259A",
+    "lastKnownWriteTime" : 1562746737,
+    "last_content_update" : 1562746737171,
+    "path" : "~/Desktop/asd_analysis/Workflow for ASD Data.R",
+    "project_path" : "Workflow for ASD Data.R",
+    "properties" : {
+        "cursorPosition" : "86,65",
+        "scrollLine" : "75"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
