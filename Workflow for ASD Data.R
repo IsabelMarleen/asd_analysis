@@ -1,5 +1,8 @@
 #Workflow for PCA, UMAP, colsums and smoothed SATB2
 
+#Safepoint
+#save.image(file="Workspace for ASD Workflow.RData")
+
 #Setup
 library( ggplot2 )
 library( Matrix )
@@ -13,9 +16,9 @@ source( "spmvar.R" )
 cellinfo <- read.delim( "~/Desktop/rawMatrix/meta.txt", stringsAsFactors=FALSE )
 counts <- Seurat::Read10X("~/Desktop/rawMatrix")
 
-#Subset counts matrix to onlz those cells that appear in the cellinfo table 
+#Subset counts matrix to only those cells that appear in the cellinfo table 
 counts <- counts[ , cellinfo$cell ]
-
+counts <- counts[, colSums(counts) > 500 ]
 # Remove genes that are not seen in any cell
 counts <- counts[ rowSums(counts) > 0,  ]
 
@@ -186,3 +189,32 @@ ggplot( ttres ) +
 
 tibble( NFU1=means_SATB2pos["NFU1",], diagnoses ) %>% ggplot + geom_point(aes(x=1,y=NFU1, diagnoses=))
 
+
+#Using the MAST package in an attempt to replicate Schirmer results
+MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI + 
+      region + Capbatch + Seqbatch + ribo_perc, counts, method = "glmer", 
+    ebayes = F, silent=T)
+
+# Where cngeneson is gene detection rate (factor recommended in MAST tutorial), 
+# Capbatch is 10X capture batch, Seqbatch is sequencing batch, ind is individual label, 
+# RIN is RNA integrity number, PMI is post-mortem interval and ribo_perc is 
+# ribosomal RNA fraction.
+
+#Following protocol
+#https://www.bioconductor.org/packages/release/bioc/vignettes/MAST
+#/inst/doc/MAITAnalysis.html
+
+
+counts3 <- counts
+
+freq_expressed <- 0.2
+FCTHRESHOLD <- log2(1.5)
+data(maits, package="MAST")
+dim(maits$expressionmat)
+head(maits$cdat)
+head(maits$fdat)
+
+scaRaw <- MAST::FromMatrix(t(maits$expressionmat), maits$cdat, maits$fdat)
+
+f <- log1p(t(t(counts) / colSums(counts))*10^6) #%>%
+g <- f/log(2, base=exp(1))
