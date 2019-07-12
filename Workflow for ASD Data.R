@@ -203,18 +203,16 @@ MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI +
 #Following protocol
 #https://www.bioconductor.org/packages/release/bioc/vignettes/MAST
 #/inst/doc/MAITAnalysis.html
-
+library(MAST)
 
 counts3 <- counts
 
-freq_expressed <- 0.2
-FCTHRESHOLD <- log2(1.5)
-data(maits, package="MAST")
-dim(maits$expressionmat)
-head(maits$cdat)
-head(maits$fdat)
-
-scaRaw <- MAST::FromMatrix(t(maits$expressionmat), maits$cdat, maits$fdat)
-
 f <- log1p(t(t(counts) / colSums(counts))*10^6) #%>%
 g <- f/log(2, base=exp(1))
+
+sce <- SingleCellExperiment(assays = list(counts = g), colData= cellinfo)
+sca <- as(sce, 'SingleCellAssay')
+zlm <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                   region + Capbatch + Seqbatch + RNA.ribosomal.percent, sca, method = "glmer", 
+                 ebayes = F, silent=T)
+
