@@ -64,7 +64,7 @@ calc_umap_etc <- function( samplename ) {
 #Calculate UMAP, PCA etc for all samples  
 data <- sapply( samplenames, calc_umap_etc, simplify=FALSE )
 
-save( data, file="data.rda" )
+
 
 #Function that adds raw and smoothed gene expression to data
 add_gene <- function( gene )
@@ -85,6 +85,8 @@ add_gene( "SATB2" )
 add_gene( "NFU1" )
 add_gene("COX5B")
 
+#save( data, file="data.rda" )
+
 #Create all UMAPs, whith the red colour channel being the SATB2 expression
 #and the green one the COXB5 expression, overlapping regions are yellow
 #No systematic difference between ASD and Control samples visible
@@ -96,7 +98,7 @@ a %>% ggplot +
   geom_point( aes( UMAP1, UMAP2 ), size=.3,
      col = rgb( 
        red = pmin( 1, a$smooth_SATB2^.15/.4), 
-       green = pmin( 1, a$smooth_COX5B^.15/.3),
+       green = pmin( 1, a$smooth_NFU1^.15/.3),
        blue = .3 ) ) +
   coord_fixed() +
   facet_wrap( ~ smpl ) +
@@ -189,6 +191,29 @@ ggplot( ttres ) +
 
 tibble( NFU1=means_SATB2pos["NFU1",], diagnoses ) %>% ggplot + geom_point(aes(x=1,y=NFU1, diagnoses=))
 
+#Replacing zero-inflated model with simple t-tests on all cells, not only SATB2 positive ones
+
+avg_genes <- function( s ) {
+  #Subsetting names of data according to sample
+  allcells <- rownames(data[[s]])
+  # Get fractions for gene g, and take average
+  rowMeans( t( t(counts[ , allcells ]) / colSums( counts[ , allcells] ) ) )
+}
+
+means <- sapply( names(data), avg_genes)
+
+#Assertion
+stopifnot( all( names(diagnoses) == colnames(means) ) )
+
+#t Test for all cells
+ttres2 <- genefilter::rowttests( means, diagnoses )
+rownames(ttres2) <- rownames(means)
+
+
+#Multiple testing correction for all cells
+#Still no siginificant evidence for differences
+ttres2$padj <- p.adjust(ttres2$p.value, method="BH")
+
 
 #Using the MAST package in an attempt to replicate Schirmer results
 MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI + 
@@ -215,4 +240,7 @@ sca <- as(sce, 'SingleCellAssay')
 zlm <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
                    region + Capbatch + Seqbatch + RNA.ribosomal.percent, sca, method = "glmer", 
                  ebayes = F, silent=T)
+
+
+
 
