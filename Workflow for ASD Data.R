@@ -220,14 +220,58 @@ MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI +
       region + Capbatch + Seqbatch + ribo_perc, counts, method = "glmer", 
     ebayes = F, silent=T)
 
-# Where cngeneson is gene detection rate (factor recommended in MAST tutorial), 
-# Capbatch is 10X capture batch, Seqbatch is sequencing batch, ind is individual label, 
-# RIN is RNA integrity number, PMI is post-mortem interval and ribo_perc is 
-# ribosomal RNA fraction.
+#t Test for only L2/3
+avg_genesL23 <- function( s ) {
+  SATB2pos <- rownames(data[[s]])
+  #Subsetting names of data according to sample and cluster
+  allcells <- rownames(data[[s]])[ data[[s]]$cluster == "L2/3" ]
+  # Get fractions for gene g, and take average
+  rowMeans( t( t(counts[ , allcells ]) / colSums( counts[ , allcells] ) ) )
+}
+
+meansL23 <- sapply( names(data), avg_genes)
+
+#Assertion
+stopifnot( all( names(diagnoses) == colnames(meansL23) ) )
+
+#t Test for all L2/3 cells
+ttres3 <- genefilter::rowttests( meansL23, diagnoses )
+rownames(ttres3) <- rownames(meansL23)
+
+
+#Multiple testing correction for all cells
+#Still no siginificant evidence for differences
+ttres3$padj <- p.adjust(ttres3$p.value, method="BH")
+
+#Relating results of t test with results given in paper for LMM
+S4 <- read.table("~/Desktop/S4.csv", header= TRUE, sep=";")
+S4 <- S4[S4$X...Cell.type == "L2/3", ]
+S4$Gene.name %in% rownames(ttres3)
+
+
+#Plot difference in means against p Value and colour in genes from S4
+ggplot() +
+  geom_point(aes(x=ttres3$dm, y=-log10(ttres3$p.value), col=rownames(ttres3)%in% S4$Gene.name)) +
+  scale_x_continuous(limits=c(-0.001,0.001),oob=scales::squish)
+  
+ 
+
+
+#Plot ttres against ttres2 to see whether filtering for SATB2 pos cells makes a systematic difference
+plot(ttres$p.value[1:100], ttres2$p.value[1:100], type="p")
+plot(ttres$padj[1:100], ttres2$padj[1:100], type="p")
+
+
 
 #Following protocol
 #https://www.bioconductor.org/packages/release/bioc/vignettes/MAST
 #/inst/doc/MAITAnalysis.html
+
+# cngeneson is gene detection rate (factor recommended in MAST tutorial), 
+# Capbatch is 10X capture batch, Seqbatch is sequencing batch, ind is individual label, 
+# RIN is RNA integrity number, PMI is post-mortem interval and ribo_perc is 
+# ribosomal RNA fraction.
+
 library(MAST)
 
 counts3 <- counts
@@ -241,6 +285,35 @@ zlm <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity
                    region + Capbatch + Seqbatch + RNA.ribosomal.percent, sca, method = "glmer", 
                  ebayes = F, silent=T)
 
+#Fitting model only for NFU1
+
+zlm <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                   region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaNFU1, method = "glmer", 
+                 ebayes = F, silent=T)
+
+lrTest( zlm, Hypothesis("diagnosisControl") )
 
 
+#Fitting model with only L2/3 cells and TTF2
 
+sceTTF2 <- SingleCellExperiment(assays = list(counts = g[, cellinfo$cell[cellinfo$cluster == "L2/3"]]), colData= cellinfo[cellinfo$cluster == "L2/3", ])
+scaTTF2 <- sca["TTF2",]
+assay(scaTTF2) <- as.matrix(assay(scaTTF2))
+
+zlm2 <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                   region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2, method = "glmer", 
+                 ebayes = F, silent=T)
+
+lrTest( zlm2, Hypothesis("diagnosisControl") )
+
+
+meansL23
+
+sampleinfo2 <- cellinfo %>% select( sample, diagnosis, individual, age, sex, RNA.Integrity.Number, 
+                     post.mortem.interval..hours., region, Capbatch, Seqbatch ) %>% distinct()
+
+fit <- limma::eBayes(limma::lmFit( meansL23[ , sampleinfo2$sample ],
+   model.matrix( ~ diagnosis + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+      region + Capbatch + Seqbatch , sampleinfo2 ) ))
+
+   
