@@ -13,8 +13,8 @@ library( tidyverse )
 source( "spmvar.R" )
 
 #Load data
-cellinfo <- read.delim( "~/Desktop/rawMatrix/meta.txt", stringsAsFactors=FALSE )
-counts <- Seurat::Read10X("~/Desktop/rawMatrix")
+cellinfo <- read.delim( "~/sds/sd17l002/u/isabel/rawMatrix/meta.txt", stringsAsFactors=FALSE )
+counts <- Seurat::Read10X("~/sds/sd17l002/u/isabel/rawMatrix")
 
 #Subset counts matrix to only those cells that appear in the cellinfo table 
 counts <- counts[ , cellinfo$cell ]
@@ -276,7 +276,7 @@ library(MAST)
 
 counts3 <- counts
 
-f <- log1p(t(t(counts) / colSums(counts))*10^6) #%>%
+f <- log1p(t(t(counts) / Matrix::colSums(counts))*10^6)
 g <- f/log(2, base=exp(1))
 
 sce <- SingleCellExperiment(assays = list(counts = g), colData= cellinfo)
@@ -296,24 +296,80 @@ lrTest( zlm, Hypothesis("diagnosisControl") )
 
 #Fitting model with only L2/3 cells and TTF2
 
-sceTTF2 <- SingleCellExperiment(assays = list(counts = g[, cellinfo$cell[cellinfo$cluster == "L2/3"]]), colData= cellinfo[cellinfo$cluster == "L2/3", ])
-scaTTF2 <- sca["TTF2",]
-assay(scaTTF2) <- as.matrix(assay(scaTTF2))
+sceTTF2 <- SingleCellExperiment( assays = 
+                                list( counts = g[, cellinfo$cell[ cellinfo$cluster == "L2/3" ] ] ), 
+                                colData= cellinfo[ cellinfo$cluster == "L2/3", ] )
+scaTTF2 <- sca[ "TTF2", ]
+assay( scaTTF2 ) <- as.matrix( assay( scaTTF2 ) )
 
-zlm2 <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
-                   region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2, method = "glmer", 
-                 ebayes = F, silent=T)
+zlm2 <- MAST::zlm( ~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                    region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2, method = "glmer", 
+                  ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 
-lrTest( zlm2, Hypothesis("diagnosisControl") )
+lrTest( zlm2, Hypothesis( "diagnosisControl" ) )
 
-
+#Normal linear model
 meansL23
 
 sampleinfo2 <- cellinfo %>% select( sample, diagnosis, individual, age, sex, RNA.Integrity.Number, 
-                     post.mortem.interval..hours., region, Capbatch, Seqbatch ) %>% distinct()
+                                    post.mortem.interval..hours., region, Capbatch, Seqbatch ) %>% distinct()
 
 fit <- limma::eBayes(limma::lmFit( meansL23[ , sampleinfo2$sample ],
-   model.matrix( ~ diagnosis + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
-      region + Capbatch + Seqbatch , sampleinfo2 ) ))
+                                   model.matrix( ~ diagnosis + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                                                   region + Capbatch + Seqbatch , sampleinfo2 ) ))
+
+
+#Permutations test
+
+pvalue <- list()
+
+for (i in seq(1, 10, 1)) {
+  scaTTF2perm <- scaTTF2
+  colData(scaTTF2perm) %>% as_tibble %>% left_join( by = "sample", 
+    colData(scaTTF2perm) %>% as_tibble %>% dplyr::select( sample, diagnosis_old=diagnosis ) %>% 
+    distinct %>% mutate( diagnosisPerm = sample(diagnosis_old) ) ) %>%
+    pull( diagnosisPerm ) -> a 
+  b <- colData(scaTTF2perm)
+  b$diagnosisPerm <- a
+  
+  scaTTF2perm <- SingleCellExperiment(
+    assays = list( counts =  assay(scaTTF2) ), colData = b)
+  scaTTF2perm <- as(scaTTF2perm, 'SingleCellAssay')
+  
+  zlm2 <- MAST::zlm(~ diagnosisPerm + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                      region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2perm, method = "glmer", 
+                    ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
+ k <- lrTest( zlm2, Hypothesis("diagnosisPermControl") )
+ k <- as.data.frame(k)
+  pvalue[[i]] <- k$`hurdle.Pr(>Chisq)`
+}
+
+
+
+
+scaTTF2perm <- scaTTF2
+colData(scaTTF2perm) %>% as_tibble %>% left_join( by = "sample", 
+   colData(scaTTF2perm) %>% as_tibble %>% dplyr::select( sample, diagnosis_old=diagnosis ) %>% 
+      distinct %>% mutate( diagnosisPerm = sample(diagnosis_old) ) ) %>%
+  pull( diagnosisPerm ) -> a 
+b <- colData(scaTTF2perm)
+b$diagnosisPerm <- a
+colData(scaTTF2perm) <- b
+
+scaTTF2perm <- SingleCellExperiment(
+  assays = list( counts =  assay(scaTTF2) ), colData = b)
+scaTTF2perm <- as(scaTTF2perm, 'SingleCellAssay')
+
+zlm2 <- MAST::zlm(~ diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
+                    region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2, method = "glmer", 
+                  ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
+lrTest( zlm2, Hypothesis("diagnosisControl") )
+
+
+
+
+
+
+
 
    
