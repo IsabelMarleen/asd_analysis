@@ -1,7 +1,7 @@
 #Workflow for PCA, UMAP, colsums and smoothed SATB2
 
 #Safepoint
-#save.image(file="Workspace for ASD Workflow.RData")
+save.image(file="Workspace for ASD Workflow.RData")
 
 #Setup
 library( ggplot2 )
@@ -215,11 +215,6 @@ rownames(ttres2) <- rownames(means)
 ttres2$padj <- p.adjust(ttres2$p.value, method="BH")
 
 
-#Using the MAST package in an attempt to replicate Schirmer results
-MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI + 
-      region + Capbatch + Seqbatch + ribo_perc, counts, method = "glmer", 
-    ebayes = F, silent=T)
-
 #t Test for only L2/3
 avg_genesL23 <- function( s ) {
   SATB2pos <- rownames(data[[s]])
@@ -271,6 +266,10 @@ plot(ttres$padj[1:100], ttres2$padj[1:100], type="p")
 # Capbatch is 10X capture batch, Seqbatch is sequencing batch, ind is individual label, 
 # RIN is RNA integrity number, PMI is post-mortem interval and ribo_perc is 
 # ribosomal RNA fraction.
+#Using the MAST package in an attempt to replicate Schirmer results
+MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI + 
+            region + Capbatch + Seqbatch + ribo_perc, counts, method = "glmer", 
+          ebayes = F, silent=T)
 
 library(MAST)
 
@@ -307,6 +306,63 @@ zlm2 <- MAST::zlm( ~diagnosis + (1|individual) + genes + age + sex + RNA.Integri
                   ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 
 lrTest( zlm2, Hypothesis( "diagnosisControl" ) )
+
+#Including scale factors for zlm on L2/3 and TTF2
+cellinfo_scale <- data.frame(
+    sample = cellinfo$sample,
+    diagnosis = cellinfo$diagnosis,
+    genes = scale(cellinfo$genes),
+    age = scale(cellinfo$age),
+    sex = cellinfo$sex,
+    RIN = scale(cellinfo$RNA.Integrity.Number),
+    PMI = scale(cellinfo$post.mortem.interval..hours.),
+    region = cellinfo$region,
+    Capbatch = cellinfo$Capbatch,
+    Seqbatch = cellinfo$Seqbatch,
+    ind = cellinfo$individual,
+    ribo_perc = scale(cellinfo$RNA.ribosomal.percent))
+
+sceTTF2_scale <- SingleCellExperiment( assays = 
+                        list( counts = g[, cellinfo$cell[ cellinfo$cluster == "L2/3"] ] ), 
+                        colData= cellinfo_scale[ cellinfo$cluster == "L2/3", ] )
+scaTTF2_scale <- as(sceTTF2_scale, 'SingleCellAssay')
+
+scaTTF2_scale <- scaTTF2_scale[ "TTF2", ]
+assay( scaTTF2_scale ) <- as.matrix( assay( scaTTF2_scale ) )
+
+zlm_scale <- MAST::zlm( ~diagnosis + (1|ind) + genes + age + sex + RIN + PMI + 
+                     region + Capbatch + Seqbatch + ribo_perc, scaTTF2_scale, method = "glmer", 
+                   ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
+
+
+lrTest( zlm_scale, Hypothesis( "diagnosisControl" ) )
+
+#Permutation test on scaled
+pvalue_scale <- list()
+
+for (i in seq(1, 100, 1)) {
+  scaTTF2perm <- scaTTF2_scale
+  colData(scaTTF2perm) %>% as_tibble %>% left_join( by = "sample", 
+  colData(scaTTF2perm) %>% as_tibble %>% dplyr::select( sample, diagnosis_old=diagnosis ) %>% 
+                      distinct %>% mutate( diagnosisPerm = sample(diagnosis_old) ) ) %>%
+    pull( diagnosisPerm ) -> a 
+  b <- colData(scaTTF2perm)
+  b$diagnosisPerm <- a
+  
+  scaTTF2perm <- SingleCellExperiment(
+    assays = list( counts =  assay(scaTTF2_scale) ), colData = b)
+  scaTTF2perm <- as(scaTTF2perm, 'SingleCellAssay')
+  
+  zlm2 <- MAST::zlm(~ diagnosisPerm + (1|ind) + genes + age + sex + RIN + PMI + 
+                      region + Capbatch + Seqbatch + ribo_perc, scaTTF2perm, method = "glmer", 
+                    ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
+  k <- lrTest( zlm2, Hypothesis("diagnosisPermControl") )
+  k <- as.data.frame(k)
+  pvalue_scale[[i]] <- k$`hurdle.Pr(>Chisq)`
+}
+
+#Looking at pvalues in QQplot
+plot(-log10(ppoints(100, 0.1)), -log10(sort(unlist(pvalue_scale))))
 
 #Normal linear model
 meansL23
@@ -364,10 +420,6 @@ zlm2 <- MAST::zlm(~ diagnosis + (1|individual) + genes + age + sex + RNA.Integri
                     region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2, method = "glmer", 
                   ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 lrTest( zlm2, Hypothesis("diagnosisControl") )
-
-
-
-
 
 
 
