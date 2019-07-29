@@ -30,7 +30,7 @@ counts <- Seurat::Read10X("~/tmp/ASD/rawMatrix")
 ##Subset and Normalise Counts
 Doublecheck whether the column names in the count matrix and the cell barcodes in the "meta.txt" file are the identical, then remove genes that do noty appear in any cell.
 ```{r}
-stopifnot( identical( meta$cell, colnames(counts) ) )
+stopifnot( identical( cellinfo$cell, colnames(counts) ) )
 counts <- counts[ rowSums(counts) > 0,  ]
 ```
 
@@ -100,7 +100,7 @@ gene <- "TTF2"
 ```{r}
 zlm_fit <- zlm( 
   ~ diagnosis + (1|ind) + genes + age + sex + RIN + PMI + region + Capbatch + Seqbatch + ribo_perc, 
-  subset_sca_to_gene( sca, "TTF2" ), 
+  subset_sca_to_gene( sca, gene ), 
   method = "glmer", ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 
 #likelihood ratio test to obtain p-Values
@@ -142,7 +142,7 @@ and this shuffled table can be easily added to the 'cellinfo' table as extra col
 sce_perm <- sce
 colData(sce_perm)$diagnosis_perm <-
   left_join(         
-     as.data.frame(colData(sca_perm)),
+     as.data.frame(colData(sce_perm)),
      diagn %>% mutate( diagnosis_perm = sample(diagnosis) ) )$diagnosis_perm
 ```
 
@@ -167,11 +167,12 @@ pvalues_perm <- rep( NA, n_perm )
 lambdas_perm <- rep( NA, n_perm )
 
 for (i in 1:n_perm) {
+ suppressMessages( suppressWarnings({
 
   sce_perm <- sce
   colData(sce_perm)$diagnosis_perm <-
     left_join(         
-      as.data.frame(colData(sca_perm)),
+      as.data.frame(colData(sce_perm)),
       diagn %>% mutate( diagnosis_perm = sample(diagnosis) ) )$diagnosis_perm
 
   zlm_fit_perm <- MAST::zlm( 
@@ -183,7 +184,7 @@ for (i in 1:n_perm) {
     lrTest( zlm_fit_perm, Hypothesis( "diagnosis_permControl" ) )[ 1, "hurdle", "Pr(>Chisq)" ]
   lambdas_perm[i] <-
     lrTest( zlm_fit_perm, Hypothesis( "diagnosis_permControl" ) )[ 1, "hurdle", "lambda" ]
-
+ }))
 }
 ```
   
@@ -200,7 +201,7 @@ This looks still reasonable. However, the QQ plot does not:
 The p-values generated for each of the permutations are sorted and the -log10 is plotted against the -log10 of a hundred evenly spaced points to generate a QQ plot.
 ```{r}
 plot(
-  -log10( ppoints( 100 ) ), 
+  -log10( ppoints( n_perm ) ), 
   -log10( sort( pvalues_perm ) ), 
   main="QQ Plot", 
   xlab="-log10 of evenly-spaced points", 
