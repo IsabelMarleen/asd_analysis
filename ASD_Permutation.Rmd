@@ -1,0 +1,224 @@
+---
+title: "Double-checking the MAST::zlm Result of the ASD Study with Permutations"
+author: "Isabel Marleen Pötzsch, Simon Anders"
+date: "2019-07-27"
+output: html_document
+---
+
+#R setup
+
+##Load Libraries and Data
+
+Firstly, all relevant libraries, the raw data and the additional meta data are loaded. 
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+#library( ggplot2 )
+library( Matrix )
+#library( locfit )
+#library( purrr )
+#library( furrr )
+library( tidyverse )
+library(MAST)
+library(lme4)
+
+#Load data
+cellinfo <- read.delim( "~/tmp/ASD/meta.txt", stringsAsFactors=FALSE )
+counts <- Seurat::Read10X("~/tmp/ASD/rawMatrix")
+```
+
+
+##Subset and Normalise Counts
+Doublecheck whether the column names in the count matrix and the cell barcodes in the "meta.txt" file are the identical, then remove genes that do noty appear in any cell.
+```{r}
+stopifnot( identical( meta$cell, colnames(counts) ) )
+counts <- counts[ rowSums(counts) > 0,  ]
+```
+
+We normalize by scaling to TPM, and taking log2 
+
+```{r}
+#Normalising counts
+expr <- log1p(t( t(counts) / colSums(counts) )*1e6) / log(2)
+```
+
+
+##Scale Factors
+To improve results using the zlm function, numeric factors are scaled and included in a data frame called `cellinfo_scaled`. This follows the code that Dmitry has sent us.
+```{r}
+#Scale factors for zlm
+cellinfo_scaled <- data.frame(
+  sample = cellinfo$sample,
+  cluster = cellinfo$cluster,
+  diagnosis = cellinfo$diagnosis,
+  genes = scale(cellinfo$genes),
+  age = scale(cellinfo$age),
+  sex = cellinfo$sex,
+  RIN = scale(cellinfo$RNA.Integrity.Number),
+  PMI = scale(cellinfo$post.mortem.interval..hours.),
+  region = cellinfo$region,
+  Capbatch = cellinfo$Capbatch,
+  Seqbatch = cellinfo$Seqbatch,
+  ind = cellinfo$individual,
+  ribo_perc = scale(cellinfo$RNA.ribosomal.percent))
+```
+
+#MAST analysis
+
+##Create SCA object of cells in L2/3 cluster of one gene
+For the MAST analysis, we create a SingleCellExperiment object first, including all cells in the L2/3 cluster, as given in cellinfo. This is converted into a SingleCellAssay object as required in the MAST package. This SingleCellAssay object is subset to only one gene to exemplify the work flow and cut down on computational demand.
+```{r}
+# SCE object
+sce <- SingleCellExperiment( 
+  assays = list( logTPM = expr ), 
+  colData = cellinfo_scaled )
+
+# Subset to only L2/3 cells
+sce <- sce[ , sce$cluster == "L2/3" ]
+
+# Convert to SCA object (required by MAST)
+sca <- as( sce, 'SingleCellAssay' )
+
+# Subsetting to a single gene only works if we convert the matrix to a dense one afterwards,
+# so we write a function for that
+subset_sca_to_gene <- function( sca, g ) {
+  sca <- sca[ g, ]
+  assay( sca ) <- as.matrix( assay( sca ) )
+  return( sca )
+}
+```
+
+##Fit ZLM
+
+After creation of an appropriate SingleCellAssay object, a zero-inflated linear model is fitted via the zlm function from the MAST package and evaluated with a likelihood ratio test.
+
+We test this for "TTF2", the most significant hit for L2/3:
+
+```{r}
+gene <- "TTF2"
+```
+
+```{r}
+zlm_fit <- zlm( 
+  ~ diagnosis + (1|ind) + genes + age + sex + RIN + PMI + region + Capbatch + Seqbatch + ribo_perc, 
+  subset_sca_to_gene( sca, "TTF2" ), 
+  method = "glmer", ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
+
+#likelihood ratio test to obtain p-Values
+lrTest( zlm_fit, Hypothesis( "diagnosisControl" ) )
+```
+
+We will use the value in the field labelled with "Pr(>Chisq)" and "hurdle" as the p value:
+
+```{r}
+lrTest( zlm_fit, Hypothesis( "diagnosisControl" ) )[ 1, "hurdle", "Pr(>Chisq)" ]
+```
+
+We hope that this is the same p value as used in the paper. (We cannot check as only the adjusted p values are given in the paper's supplement, and we cannot adjust without calculating for all genes.)
+
+# Test validation by permutation
+
+To validate the results seen in the zlm test, we use permutations: We randomly shuffle the assignments of diagnoses to the samples, then for each permutation, a zlm is fitted and a likelihood ratio test is performed. We run one hundred permutations and then check whether the p values from the permutations follow a uniform distribution, as they should nif the test were valid. 
+
+## Do the permutation
+
+First, get the assignment of samples to diagnoses
+
+```{r}
+cellinfo %>%
+  select( sample, diagnosis ) %>%
+  distinct ->
+     diagn
+head(diagn)
+```
+
+This can be easily shuffled:
+
+```{r}
+diagn %>% mutate( diagnosis_perm = sample(diagnosis) )
+```
+and this shuffled table can be easily added to the 'cellinfo' table as extra column
+
+```{r}
+sce_perm <- sce
+colData(sce_perm)$diagnosis_perm <-
+  left_join(         
+     as.data.frame(colData(sca_perm)),
+     diagn %>% mutate( diagnosis_perm = sample(diagnosis) ) )$diagnosis_perm
+```
+
+With this, we can redo the zlm fit using the permuted column
+
+```{r}
+zlm_fit_perm <- MAST::zlm( 
+  ~ diagnosis_perm + (1|ind) + genes + age + sex + RIN + PMI + region + Capbatch + Seqbatch + ribo_perc, 
+  subset_sca_to_gene( as( sce_perm, "SingleCellAssay" ), "TTF2" ), 
+  method = "glmer", ebayes = F, silent=T, fitArgsD = list(nAGQ = 0) )
+
+lrTest( zlm_fit_perm, Hypothesis( "diagnosis_permControl" ) )[ 1, "hurdle", "Pr(>Chisq)" ]
+```
+
+# Do 100 permutations
+
+We now do this 100 times
+```{r}
+n_perm <- 100   # number of permutations
+
+pvalues_perm <- rep( NA, n_perm )
+lambdas_perm <- rep( NA, n_perm )
+
+for (i in 1:n_perm) {
+
+  sce_perm <- sce
+  colData(sce_perm)$diagnosis_perm <-
+    left_join(         
+      as.data.frame(colData(sca_perm)),
+      diagn %>% mutate( diagnosis_perm = sample(diagnosis) ) )$diagnosis_perm
+
+  zlm_fit_perm <- MAST::zlm( 
+    ~ diagnosis_perm + (1|ind) + genes + age + sex + RIN + PMI + region + Capbatch + Seqbatch + ribo_perc, 
+    subset_sca_to_gene( as( sce_perm, "SingleCellAssay" ), "TTF2" ), 
+    method = "glmer", ebayes = F, silent=T, fitArgsD = list(nAGQ = 0) )
+  
+  pvalues_perm[i] <-
+    lrTest( zlm_fit_perm, Hypothesis( "diagnosis_permControl" ) )[ 1, "hurdle", "Pr(>Chisq)" ]
+  lambdas_perm[i] <-
+    lrTest( zlm_fit_perm, Hypothesis( "diagnosis_permControl" ) )[ 1, "hurdle", "lambda" ]
+
+}
+```
+  
+## Results
+
+First, a histogram of the p values from the permutations:
+
+```{r}
+hist( pvalues_perm )
+```
+  
+This looks still reasonable. However, the QQ plot does not:
+
+The p-values generated for each of the permutations are sorted and the -log10 is plotted against the -log10 of a hundred evenly spaced points to generate a QQ plot.
+```{r}
+plot(
+  -log10( ppoints( 100 ) ), 
+  -log10( sort( pvalues_perm ) ), 
+  main="QQ Plot", 
+  xlab="-log10 of evenly-spaced points", 
+  ylab="-log10 of p-values from permutations" )
+abline(0,1)
+```
+
+This QQ plot shows that the p-values generated by a random distribution of diagnoses using MAST are sytematically too small: there is a strong excess of very small p values, even though there should be no signal in the permutated data. This can also be seen by simply sorting them:
+
+```{r}
+sort( pvalues_perm )
+```
+
+Hence, it is possible that the significant values seen in the actual analysis are an artefact of the MAST package which does not seem to correctly control type-I error rate.
+
+At least, none of the permuted test statistics (the "lambda" values) is larger than the actually observed statistic (31):
+
+```{r}
+sum( lambdas_perm > 31 )
+```
+Hence, the permutation p value is smaller than 1/100. We would need to do more permutations to get an actual value. It is unclear, however, that this value would survive adjustment for multiple testing.
