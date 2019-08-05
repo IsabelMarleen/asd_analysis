@@ -1,0 +1,73 @@
+DE via Pseudobulk
+=================
+
+Simon Anders, 2019-07-30
+
+Using the data from the ASD paper, this short notebook shows how a DE analysis can be done using pseudobulks: For a given cell sub-population 
+(here used as example: the L2/3 neurons), add up the counts over all cells in each sample, then perform a normal DESeq2 analysis on that.
+
+```{r}
+suppressPackageStartupMessages({
+library( tidyverse )
+library( Matrix )
+library( DESeq2 )
+})
+```
+
+Load ASD data:
+```{r}
+path <- "~/Desktop/ASD/rawMatrix/"
+cellinfo <- read.delim( file.path( path, "meta.txt" ), stringsAsFactors=FALSE )
+counts <- readMM( file.path( path, "matrix.mtx" ) )
+rownames(counts) <- read.delim( file.path( path, "genes.tsv" ), header=FALSE )$V2
+colnames(counts) <- readLines( file.path( path, "barcodes.tsv" ) )
+head(cellinfo)
+```
+
+Convert counts from a coordinate-sparse to a column-sparse matrix. This speeds up the calculation of the pseudobulks (but does require lots of memory here).
+
+```{r}
+counts <- as( counts, "dgCMatrix" )
+counts[ 1:5, 1:5 ]
+```
+
+Extract sample information from 'meta' table:
+```{r}
+sampleTable <-
+  cellinfo %>% select( sample : RNA.Integrity.Number ) %>% unique
+sampleTable
+```
+
+Make pseudobulk for L2/3 cells by simply summing up L2/3 cells for each sample
+```{r}
+pseudobulk_L23 <-
+  sapply( sampleTable$sample, function(s)
+    rowSums( counts[ , cellinfo$sample == s & counts["HS6ST3",], drop=FALSE ] ) )
+pseudobulk_L23[ 1:5, 1:5 ]
+```
+
+Run DESeq on the pseudobulk. 
+
+```{r}
+dds2 <- DESeqDataSetFromMatrix( pseudobulk_L23, sampleTable, ~ diagnosis )
+dds2 <- DESeq( dds2 )
+res2 <- results( dds2 )
+```
+
+Show top hits
+```{r}
+res2[ order(res2$padj), ]
+
+```
+
+How many hits at 10% FDR?
+
+```{r}
+table( res$padj < .1 )
+```
+
+Session info
+
+```{r}
+sessionInfo()
+```
