@@ -13,14 +13,14 @@ library( tidyverse )
 source( "spmvar.R" )
 
 #Load data
-cellinfo <- read.delim( "~/sds/sd17l002/u/isabel/rawMatrix/meta.txt", stringsAsFactors=FALSE )
-counts <- Seurat::Read10X("~/sds/sd17l002/u/isabel/rawMatrix")
+cellinfo <- read.delim( "~/Desktop/ASD/rawMatrix/meta.txt", stringsAsFactors=FALSE )
+counts <- Seurat::Read10X("~/Desktop/ASD/rawMatrix")
 
 #Subset counts matrix to only those cells that appear in the cellinfo table 
 counts <- counts[ , cellinfo$cell ]
-counts <- counts[, colSums(counts) > 500 ]
+counts <- counts[, Matrix::colSums(counts) > 500 ]
 # Remove genes that are not seen in any cell
-counts <- counts[ rowSums(counts) > 0,  ]
+counts <- counts[ Matrix::rowSums(counts) > 0,  ]
 
 #Make backup of counts matrix
 counts_bak2 <- counts
@@ -120,6 +120,14 @@ a %>% ggplot +
   coord_fixed() +
   facet_wrap( ~ smpl ) +
   theme_dark() + theme( plot.background = element_rect(fill="black") )
+
+
+data %>%
+  bind_rows( .id="sample" ) %>% 
+  left_join( sampleinfo ) %>% 
+  ggplot +
+  geom_point( aes( UMAP1, UMAP2 , col= region), size=.3 ) +
+  coord_fixed() 
 
 #Create a plot for each sample of smoothed SATB2 against NFU1
 data %>%
@@ -422,6 +430,54 @@ zlm2 <- MAST::zlm(~ diagnosis + (1|individual) + genes + age + sex + RNA.Integri
 lrTest( zlm2, Hypothesis("diagnosisControl") )
 
 
+#Do DESeq for all different clusters and compare
+pseudobulk_L23 <-
+  sapply( sampleTable$sample, function(s)
+    rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster=="L2/3", drop=FALSE ] ) )
+dds_L23 <- DESeqDataSetFromMatrix( pseudobulk_L23, sampleTable, ~ diagnosis )
+dds_L23 <- DESeq( dds_L23 )
+res_L23 <- results( dds_L23 )
+
+sapply( unique( cellinfo$cluster ), function( clust ) {
+    assign( paste0( "pseudobulk_", clust ),  sapply( sampleTable$sample, function(s) {
+           rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster == clust, drop=FALSE ] ) }) )
+  
+    pseudobulk <-  sapply( sampleTable$sample, function(s) {
+    rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster == clust, drop=FALSE ] ) } )
+    dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis )
+    dds <-  DESeq( dds )
+    assign( paste0( "res_", clust ), results( dds) )
+
+}  )
+
+cluster <- "Microglia"
+do_DESeq_cluster <- function( cluster ){
+  pseudobulk <- sapply( sampleTable$sample, function(s)
+      rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster==cluster, drop=FALSE ] ) )
+  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
+  keep <- rowSums(counts(dds)) >= 10
+  keep2 <- colSums(counts(dds)) > 0
+  dds <- dds[keep,keep2]
+  dds <- DESeq( dds )
+  return(dds)
+}
 
 
-   
+dds_L23 <- do_DESeq_cluster("L2/3")
+dds_L4 <- do_DESeq_cluster("L4")
+dds_L56 <- do_DESeq_cluster("L5/6")
+dds_L56CC <- do_DESeq_cluster("L5/6-CC")
+dds_NRGNII <- do_DESeq_cluster("Neu-NRGN-II")
+dds_NRGNI <- do_DESeq_cluster("Neu-NRGN-I")
+dds_MG <- do_DESeq_cluster("Microglia")
+dds_OD <- do_DESeq_cluster("Oligodendrocytes")
+dds_OPC <- do_DESeq_cluster("OPC")
+dds_ASTFB <- do_DESeq_cluster("AST-FB")
+dds_ASTPP <- do_DESeq_cluster("AST-PP")
+dds_Nmat <- do_DESeq_cluster("Neu-mat")
+dds_INSST <- do_DESeq_cluster("IN-SST")
+dds_INPV <- do_DESeq_cluster("IN-PV")
+dds_INVIP <- do_DESeq_cluster("IN-VIP")
+dds_INSV2C <- do_DESeq_cluster("IN-SV2C")
+dds_ET <- do_DESeq_cluster("Endothelial")
+
