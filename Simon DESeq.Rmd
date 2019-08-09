@@ -42,21 +42,21 @@ Make pseudobulk for L2/3 cells by simply summing up L2/3 cells for each sample
 ```{r}
 pseudobulk_L23 <-
   sapply( sampleTable$sample, function(s)
-    rowSums( counts[ , cellinfo$sample == s & counts["HS6ST3",], drop=FALSE ] ) )
+    rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster=="L2/3", drop=FALSE ] ) )
 pseudobulk_L23[ 1:5, 1:5 ]
 ```
 
 Run DESeq on the pseudobulk. 
 
 ```{r}
-dds2 <- DESeqDataSetFromMatrix( pseudobulk_L23, sampleTable, ~ diagnosis )
-dds2 <- DESeq( dds2 )
-res2 <- results( dds2 )
+dds <- DESeqDataSetFromMatrix( pseudobulk_L23, sampleTable, ~ diagnosis )
+dds <- DESeq( dds )
+res <- results( dds )
 ```
 
 Show top hits
 ```{r}
-res2[ order(res2$padj), ]
+res[ order(res$padj), ]
 
 ```
 

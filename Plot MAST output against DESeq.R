@@ -13,7 +13,8 @@ res_HS6ST3 <- res2[rownames(res2) %in% results_lucas$Gene.name, ]
 
 results <- left_join(as_tibble(results_lucas), 
                      as_tibble(res_HS6ST3, rownames="Gene.name"))
-plot(log(results$q.value), log(results$padj2), xlab="q.value from Schirmer", ylab="padj from DESeq clustered by HST...")
+plot(log(results$q.value), log(results$padj2), xlab="q.value from Schirmer", ylab="padj from DESeq clustered 
+     by HST...")
 abline(0,1)
 
 

@@ -345,7 +345,7 @@ zlm_scale <- MAST::zlm( ~diagnosis + (1|ind) + genes + age + sex + RIN + PMI +
 
 lrTest( zlm_scale, Hypothesis( "diagnosisControl" ) )
 
-#Permutation test on scaled
+#Permutations on scaled
 pvalue_scale <- list()
 
 for (i in seq(1, 100, 1)) {
@@ -480,4 +480,39 @@ dds_INPV <- do_DESeq_cluster("IN-PV")
 dds_INVIP <- do_DESeq_cluster("IN-VIP")
 dds_INSV2C <- do_DESeq_cluster("IN-SV2C")
 dds_ET <- do_DESeq_cluster("Endothelial")
+
+
+#Get nearest neighbours
+nn <- get.knn(counts, k=10)
+#Comparing to genes from paper
+results_lucas <- read.delim(file="~/Desktop/ASD/S4.csv", sep=";", dec=",")
+
+plot_cluster <- function(clust1, dds) {
+  left_join(as_tibble(filter(results_lucas, results_lucas$X...Cell.type==clust1)), 
+            as_tibble(results(dds), rownames="Gene.name")) %>%
+    ggplot+
+    geom_point(aes(log(q.value), log(padj)))+
+    geom_vline(aes(xintercept=-1))+
+    geom_hline(aes(yintercept=-1))+
+    ggtitle(clust1)
+}
+
+plot_cluster("L2/3", dds_L23)
+plot_cluster("L4", dds_L4)
+plot_cluster("L5/6", dds_L56)
+plot_cluster("L5/6-CC", dds_L56CC)
+plot_cluster("AST-FB", dds_ASTFB)
+plot_cluster("AST-PP", dds_ASTPP)
+plot_cluster("Endothelial", dds_ET)
+plot_cluster("IN-PV", dds_INPV)
+plot_cluster("IN-SST", dds_INSST)
+plot_cluster("IN-SV2C", dds_INSV2C)
+plot_cluster("IN-VIP", dds_INVIP)
+plot_cluster("Microglia", dds_MG)
+plot_cluster("Neu-NRGN-I", dds_NRGNI)
+plot_cluster("Neu-NRGN-II", dds_NRGNII)
+plot_cluster("Neu-mat", dds_Nmat)
+plot_cluster("Oligodendrocytes", dds_OD)
+plot_cluster("OPC", dds_OPC)
+
 
