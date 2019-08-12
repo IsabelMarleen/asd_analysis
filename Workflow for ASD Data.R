@@ -29,7 +29,7 @@ counts_bak2 <- counts
 samplenames <- unique( cellinfo$sample ) 
 
 # sample info
-cellinfo %>% select( sample : RNA.Integrity.Number ) %>% distinct() -> sampleinfo
+cellinfo %>% select( sample : RNA.Integrity.Number ) %>% distinct() -> sampleTable
 
 # Function to calculate PCA, UMAP, colSums for a sample
 calc_umap_etc <- function( samplename ) {
@@ -84,6 +84,10 @@ add_gene <- function( gene )
 add_gene( "SATB2" )
 add_gene( "NFU1" )
 add_gene("COX5B")
+
+data2 <- data %>%
+  bind_rows( .id="sample" ) %>%
+  as_tibble 
 
 #save( data, file="data.rda" )
 
@@ -383,7 +387,7 @@ fit <- limma::eBayes(limma::lmFit( meansL23[ , sampleinfo2$sample ],
                                                    region + Capbatch + Seqbatch , sampleinfo2 ) ))
 
 
-#Permutations test
+#Permutations
 
 pvalue <- list()
 
@@ -428,6 +432,27 @@ zlm2 <- MAST::zlm(~ diagnosis + (1|individual) + genes + age + sex + RNA.Integri
                     region + Capbatch + Seqbatch + RNA.ribosomal.percent, scaTTF2, method = "glmer", 
                   ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 lrTest( zlm2, Hypothesis("diagnosisControl") )
+
+
+
+#Permutations for DESeq
+pvalue <- list()
+pseudobulk_L23 <-
+  sapply( sampleTable$sample, function(s)
+    rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster=="L2/3", drop=FALSE ] ) )
+
+for (i in seq(1, 100, 1)) {
+  columndata <- data.frame(diagnosis_new = sample(sampleTable$diagnosis))
+  dds <- DESeqDataSetFromMatrix( pseudobulk_L23, columndata, ~ diagnosis_new )
+  dds <- DESeq( dds )
+  res <- results( dds, contrast=c("diagnosis_new", "ASD", "Control") )
+  res <- res["TTF2", ]
+  pvalue[[i]] <- res$padj
+}
+
+plot(-log10(ppoints(100)), -log10(sort(unlist(pvalue))), 
+     xlab="-log10 of uniform Points", ylab="-log10 of P-Values" )
+abline(0, 1)
 
 
 #Do DESeq for all different clusters and compare
@@ -514,5 +539,21 @@ plot_cluster("Neu-NRGN-II", dds_NRGNII)
 plot_cluster("Neu-mat", dds_Nmat)
 plot_cluster("Oligodendrocytes", dds_OD)
 plot_cluster("OPC", dds_OPC)
+
+unique(data2$sample), 
+          sampleTable$diagnosis == "ASD")
+
+#Look at differential gene expression
+plot_hist_gene_celltypes <- function(gene) {
+  ans <- dplyr::filter(data2, cellinfo$cluster == "L2/3")%>%
+    mutate(state=case_when(
+      sampleTable$diagnosis == "ASD" ~ "asd",
+      TRUE ~ "control" )) %>%
+    filter( ans[[paste0("smooth_", gene)]] < .9 )
+  ggplot(ans)+
+    geom_density(aes(ans[[paste0("smooth_", gene)]]^.15, col=state))+
+    facet_wrap(~sample)
+}
+plot_hist_gene_celltypes("TTF2")
 
 
