@@ -84,6 +84,7 @@ add_gene <- function( gene )
 add_gene( "SATB2" )
 add_gene( "NFU1" )
 add_gene("COX5B")
+add_gene("TTF2")
 
 data2 <- data %>%
   bind_rows( .id="sample" ) %>%
@@ -447,13 +448,17 @@ for (i in seq(1, 100, 1)) {
   dds <- DESeq( dds )
   res <- results( dds, contrast=c("diagnosis_new", "ASD", "Control") )
   res <- res["TTF2", ]
-  pvalue[[i]] <- res$padj
+  pvalue[[i]] <- res$pvalue
 }
+#padj is a list of permutations when saving the adjusted p value
 
 plot(-log10(ppoints(100)), -log10(sort(unlist(pvalue))), 
-     xlab="-log10 of uniform Points", ylab="-log10 of P-Values" )
+     xlab="-log10 of uniform Points", ylab="-log10 of P-Values" , main="Normal P Values")
 abline(0, 1)
 
+plot(-log10(ppoints(100)), -log10(sort(unlist(padj))), 
+     xlab="-log10 of uniform Points", ylab="-log10 of P-Values" , main="Adjusted P Values")
+abline(0, 1)
 
 #Do DESeq for all different clusters and compare
 pseudobulk_L23 <-
@@ -540,20 +545,29 @@ plot_cluster("Neu-mat", dds_Nmat)
 plot_cluster("Oligodendrocytes", dds_OD)
 plot_cluster("OPC", dds_OPC)
 
-unique(data2$sample), 
-          sampleTable$diagnosis == "ASD")
 
 #Look at differential gene expression
-plot_hist_gene_celltypes <- function(gene) {
-  ans <- dplyr::filter(data2, cellinfo$cluster == "L2/3")%>%
+plot_hist_gene <- function(gene) {
+  ans <- left_join( data2, select( sampleTable, diagnosis, sample) )%>%
+    dplyr::filter(cellinfo$cluster == "L2/3")%>%
     mutate(state=case_when(
-      sampleTable$diagnosis == "ASD" ~ "asd",
+      diagnosis == "ASD" ~ "asd",
       TRUE ~ "control" )) %>%
-    filter( ans[[paste0("smooth_", gene)]] < .9 )
+    dplyr::filter( ., ans[[ paste0( "smooth_", gene ) ]] < .9 )
+  ggplot(ans)+
+    geom_density(aes(ans[[paste0("smooth_", gene)]]^.15, col=state, group=ans$sample))
+}
+plot_hist_gene_celltypes("TTF2")
+
+plot_hist_gene2 <- function(gene) {
+  ans <- left_join( data2, select( sampleTable, diagnosis, sample) )%>%
+    dplyr::filter(cellinfo$cluster == "L2/3")%>%
+    mutate(state=case_when(
+      diagnosis == "ASD" ~ "asd",
+      TRUE ~ "control" )) %>%
+    dplyr::filter( ., ans[[ paste0( "smooth_", gene ) ]] < .9 )
   ggplot(ans)+
     geom_density(aes(ans[[paste0("smooth_", gene)]]^.15, col=state))+
     facet_wrap(~sample)
 }
-plot_hist_gene_celltypes("TTF2")
-
-
+plot_hist_gene2("TTF2")
