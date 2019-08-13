@@ -512,8 +512,6 @@ dds_INSV2C <- do_DESeq_cluster("IN-SV2C")
 dds_ET <- do_DESeq_cluster("Endothelial")
 
 
-#Get nearest neighbours
-nn <- get.knn(counts, k=10)
 #Comparing to genes from paper
 results_lucas <- read.delim(file="~/Desktop/ASD/S4.csv", sep=";", dec=",")
 
@@ -571,3 +569,25 @@ plot_hist_gene2 <- function(gene) {
     facet_wrap(~sample)
 }
 plot_hist_gene2("TTF2")
+
+
+
+
+##Create new clusters by using louvain--------------------------------------------------
+library(igraph)
+a <- data2 %>%
+    select(2:21) %>%
+    as.matrix()%>%
+    FNN::get.knn()
+g <- graph_from_edgelist( as.matrix( map_dfr( 1:10, function(i)
+  data.frame( from=1:nrow(a$nn.index), to=a$nn.index[,i] ) ) ) )
+louv <- cluster_louvain( as.undirected( g, "collapse" ) )
+nn <- membership(louv)
+
+data2%>%
+  filter(sample=="1823_BA24")%>%
+  {
+    ggplot(.)+
+      geom_point(aes(.$UMAP1, .$UMAP2, col=nn))
+  }
+
