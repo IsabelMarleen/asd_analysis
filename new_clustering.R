@@ -15,12 +15,12 @@ readTENxH5File <- function( filename )
     )
   )
 
-raw <- readTENxH5File( "~/tmp/ASD/ASD.h5" )
+raw <- readTENxH5File( "/Volumes/sd17l002/u/anders/tmp/ASD.h5" )
 rawt <- t(raw)
 
 cs <- colSums(raw)
 
-meta <- read_tsv("~/tmp/ASD/meta.txt" )
+meta <- read_tsv("/Volumes/sd17l002/u/anders/tmp/ASD2/meta.txt" )
 
 meta %>% 
 select( sample : `RNA Integrity Number` ) %>%
@@ -57,17 +57,18 @@ rawi <- raw[ infrmgenes, ]
 pca <- irlba::prcomp_irlba( sqrt(t(rawi)/cs), 30 )
 ump <- uwot::umap( pca$x, metric="cosine", ret_nn=TRUE, n_threads=40, min_dist=0.03, verbose=TRUE )
 
-nn <- ump$nn$cosine[,-1]
+nn <- ump$nn$cosine$idx[,-1]
 ump <- ump$embedding
 
 plot( ump, pch=".", col=adjustcolor( as.integer(as.factor(cellTable$cluster)), .1 ), asp=1 )
-text( tapply( ump[,1], cellTable$cluster, median ), tapply( ump[,2], cellTable$cluster, median ), levels(as.factor(cellTable$cluster)) )
+text( tapply( ump[,1], cellTable$cluster, median ), tapply( ump[,2], cellTable$cluster, median ), 
+      levels(as.factor(cellTable$cluster)) )
 
 
-# Get Louvain clustes
+# Get Louvain clusters
 
 library( igraph )
-g <- graph_from_edgelist( as.matrix( map_dfr( 1:10, function(i) data.frame( from=1:nrow(nn$idx), to=nn$idx[,i] ) ) ) )
+g <- graph_from_edgelist( as.matrix( map_dfr( 1:10, function(i) data.frame( from=1:nrow(nn), to=nn[,i] ) ) ) )
 louv <- cluster_louvain( as.undirected( g, "collapse" ) )
 
 ncl <- max(membership(louv))
@@ -77,7 +78,7 @@ text( tapply( ump[,1], membership(louv), median ), tapply( ump[,2], membership(l
 
 
 # Border cells: How many of the k nearest neighbors of a cell are not in the same cluster as the cell?
-foreignNN <- rowSums( matrix( membership(louv)[ nn$idx ], ncol=ncol(nn$idx) ) != membership(louv) )
+foreignNN <- rowSums( matrix( membership(louv)[ nn ], ncol=ncol(nn) ) != membership(louv) )
 table( foreignNN )
 
 # These cells have no foreign neighbors
@@ -86,15 +87,49 @@ interior <- foreignNN == 0
 plot( ump, pch=".", col = adjustcolor( ifelse( interior, "black", "red" ), .1 ), asp=1 )
 
 # For which cells is the first nearest neighbor another cluster and which is it?
-tibble( cell_cluster = membership(louv), nn1_cluster = membership(louv)[nn$idx[,1]] ) %>%
-  group_by_all %>% tally %>% spread( nn1_cluster, n, fill=0 ) %>% column_to_rownames("cell_cluster") -> cluster_nbgh
+tibble( cell_cluster = membership(louv), nn1_cluster = membership(louv)[nn[,1]] ) %>%
+  group_by_all %>% tally %>% spread( nn1_cluster, n, fill=0 ) %>% 
+  column_to_rownames("cell_cluster") -> cluster_nbgh
 
 # Show graph of clusters with at least x% of cells having a neighbor in the other cluster
 plot( graph_from_adjacency_matrix( cluster_nbgh / sizes(louv) > .01 ) )
 
 comp <- components( graph_from_adjacency_matrix( cluster_nbgh / sizes(louv) > .02 ) )
 gcms <- comp$membership[ membership(louv)  ] # grand cluster membership
-foreignNN <- rowSums( matrix( gcms[ nn$idx ], ncol=ncol(nn$idx) ) !=gcms )
+foreignNN <- rowSums( matrix( gcms[ nn ], ncol=ncol(nn) ) !=gcms )
 
 plot( ump, pch=".", col = ifelse( foreignNN>0, "#00000018", rainbow( ncl, alpha=.1, v=.7 )[ gcms ] ), asp=1 ) 
+text( tapply( ump[,1], gcms, median ), tapply( ump[,2], gcms, median ), 1:20 )
 
+#Calculation of pseudobulks for one cluster at a time
+#Add new clustering to cellTable as new column
+
+cellTable <- cellTable %>%
+  add_column(newclusters = gcms)
+
+do_DESeq_newcluster <- function( cluster ){
+  pseudobulk <- sapply( sampleTable$sample, function(s)
+    rowSums( counts[ , cellinfo$sample == s & cellTable$newclusters==cluster & foreignNN == 0, drop=FALSE ] ) )
+  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
+  keep <- rowSums(counts(dds)) >= 10
+  keep2 <- colSums(counts(dds)) > 0
+  dds <- dds[keep,keep2]
+  dds <- DESeq( dds )
+  return(dds)
+}
+
+dds_nc2 <- sapply(unique(cellTable$newclusters), do_DESeq_newcluster)
+names(dds_nc2) <- unique(cellTable$newclusters)         
+
+plot_hist_gene_cluster <- function(gene) {
+  ans <- left_join( data2, select( sampleTable, diagnosis, sample))%>%
+    add_column(newclusters=cellTable$newclusters)%>%
+    mutate(state=case_when(
+      diagnosis == "ASD" ~ "asd",
+      TRUE ~ "control" )) %>%
+    dplyr::filter( ., ans[[ paste0( "smooth_", gene ) ]] < .9 )
+  ggplot(ans)+
+    geom_density(aes(ans[[paste0("smooth_", gene)]]^.15, col=state))+
+    facet_wrap(~sample)
+}
+plot_hist_gene_cluster("CYSTM1")
