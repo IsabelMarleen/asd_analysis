@@ -4,6 +4,7 @@ library( Matrix )
 library( tidyverse )
 source( "spmvar.R" )
 library( HDF5Array )
+library(DESeq2)
 
 library( furrr )
 
@@ -17,9 +18,8 @@ sampleTable <-
 
 sampleTable$diagnosis <- relevel( factor( sampleTable$diagnosis ), "Control" )
 
-cluster <- "Microglia"
+counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
 do_DESeq_on_cluster <- function( cluster ){
-  counts <- TENxMatrix( "~/sds/sd17l002/u/anders/tmp/ASD.h5", "matrix" )
   pseudobulk <- sapply( sampleTable$sample, function(s)
     rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster==cluster, drop=FALSE ] ) )
   dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
