@@ -107,9 +107,10 @@ text( tapply( ump[,1], gcms, median ), tapply( ump[,2], gcms, median ), 1:20 )
 cellTable <- cellTable %>%
   add_column(newcluster = gcms)
 
+counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
 do_DESeq_on_newcluster <- function( cluster ){
   pseudobulk <- sapply( sampleTable$sample, function(s)
-    rowSums( counts[ , cellinfo$sample == s & cellTable$newcluster==cluster, drop=FALSE ] ) )
+    rowSums( counts[ , meta$sample == s & cellTable$newcluster==cluster, drop=FALSE ] ) )
   dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
   dds <- dds[ rowSums(counts(dds)) >= 10, colSums(counts(dds)) > 0 ]
   dds <- DESeq( dds )
@@ -121,10 +122,23 @@ results_nc <- future_map( unique(cellTable$newcluster), do_DESeq_on_newcluster )
 names(results_nc) <- unique(cellTable$newcluster)
       
 genenames <- tibble( ensg = h5read("ASD.h5", "matrix/genes"), 
-        name = h5read("ASD.h5", "matrix/gene_names") )  
-res.tibble <- map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
-  left_join( genenames, by=c( "gene" = "ensg" ) ) %>%
-  filter( .$padj < .1 )
+        name = h5read("ASD.h5", "matrix/gene_names") )
+res.paper <- read.delim("~/sds/sd17l002/u/isabel/S4.csv", sep=";", dec = ",") %>%
+  select(cluster = Cell.type, gene = gene.ID, name=Gene.name, q.value)
 
-res.paper <- read.delim("/home/Isabel/Desktop/ASD/S4.csv", sep=";", dec = ",")
+res.tibble <- map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
+  left_join( genenames, by=c( "gene" = "ensg" ) ) #%>%
+  #filter( .$padj < .1 )
+ 
+
+#Plot that relates significance from DESeq output to MAST output
+res.tibble %>%
+  left_join(res.paper)%>%
+  mutate(sign.we = padj < .1, sign.they = q.value <.1) %>% 
+  ggplot+
+      geom_point(aes(sign.they, sign.we, col=sign.we), size=.1, position= "jitter")+
+      facet_wrap(~cluster)
+
+
+
 
