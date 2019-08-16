@@ -15,12 +15,12 @@ readTENxH5File <- function( filename )
     )
   )
 
-raw <- readTENxH5File( "/Volumes/sd17l002/u/anders/tmp/ASD.h5" )
+raw <- readTENxH5File( "~/sds/sd17l002/u/anders/tmp/ASD.h5" )
 rawt <- t(raw)
 
 cs <- colSums(raw)
 
-meta <- read_tsv("/Volumes/sd17l002/u/anders/tmp/ASD2/meta.txt" )
+meta <- read_tsv("~/sds/sd17l002/u/anders/tmp/ASD2/meta.txt" )
 
 meta %>% 
 select( sample : `RNA Integrity Number` ) %>%
@@ -105,31 +105,26 @@ text( tapply( ump[,1], gcms, median ), tapply( ump[,2], gcms, median ), 1:20 )
 #Add new clustering to cellTable as new column
 
 cellTable <- cellTable %>%
-  add_column(newclusters = gcms)
+  add_column(newcluster = gcms)
 
-do_DESeq_newcluster <- function( cluster ){
+do_DESeq_on_newcluster <- function( cluster ){
   pseudobulk <- sapply( sampleTable$sample, function(s)
-    rowSums( counts[ , cellinfo$sample == s & cellTable$newclusters==cluster & foreignNN == 0, drop=FALSE ] ) )
+    rowSums( counts[ , cellinfo$sample == s & cellTable$newcluster==cluster, drop=FALSE ] ) )
   dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
-  keep <- rowSums(counts(dds)) >= 10
-  keep2 <- colSums(counts(dds)) > 0
-  dds <- dds[keep,keep2]
+  dds <- dds[ rowSums(counts(dds)) >= 10, colSums(counts(dds)) > 0 ]
   dds <- DESeq( dds )
-  return(dds)
+  results(dds)
 }
 
-dds_nc2 <- sapply(unique(cellTable$newclusters), do_DESeq_newcluster)
-names(dds_nc2) <- unique(cellTable$newclusters)         
+plan( multiprocess, workers=20 )
+results_nc <- future_map( unique(cellTable$newcluster), do_DESeq_on_newcluster )
+names(results_nc) <- unique(cellTable$newcluster)
+      
+genenames <- tibble( ensg = h5read("ASD.h5", "matrix/genes"), 
+        name = h5read("ASD.h5", "matrix/gene_names") )  
+res.tibble <- map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
+  left_join( genenames, by=c( "gene" = "ensg" ) ) %>%
+  filter( .$padj < .1 )
 
-plot_hist_gene_cluster <- function(gene) {
-  ans <- left_join( data2, select( sampleTable, diagnosis, sample))%>%
-    add_column(newclusters=cellTable$newclusters)%>%
-    mutate(state=case_when(
-      diagnosis == "ASD" ~ "asd",
-      TRUE ~ "control" )) %>%
-    dplyr::filter( ., ans[[ paste0( "smooth_", gene ) ]] < .9 )
-  ggplot(ans)+
-    geom_density(aes(ans[[paste0("smooth_", gene)]]^.15, col=state))+
-    facet_wrap(~sample)
-}
-plot_hist_gene_cluster("CYSTM1")
+res.paper <- read.delim("/home/Isabel/Desktop/ASD/S4.csv", sep=";", dec = ",")
+
