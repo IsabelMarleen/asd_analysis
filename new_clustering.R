@@ -134,11 +134,23 @@ res.tibble <- map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
 #Plot that relates significance from DESeq output to MAST output
 res.tibble %>%
   left_join(res.paper)%>%
-  mutate(sign.we = padj < .1, sign.they = q.value <.1) %>% 
+  mutate(signif.DESeq = !is.na(padj) & padj < .05, 
+         signif.MAST = !is.na(q.value) & q.value <.05) %>% 
   ggplot+
-      geom_point(aes(sign.they, sign.we, col=sign.we), size=.1, position= "jitter")+
+      geom_point(aes(signif.MAST, signif.DESeq, col=signif.DESeq), size=.1, position= "jitter")+
       facet_wrap(~cluster)
 
+#Plot that compares DESeq on manual clusters and paper clusters
+#Currently this plots all genes, which takes long and is not very smart
+map_dfr( results_nc, as_tibble, rownames="gene", .id="newcluster" ) %>%
+  mutate(padjnc = .$padj,
+            padj=NULL) %>%
+  left_join(res.tibble, by="gene")%>%
+  mutate(sign.nc = padjnc < .1, sign.pc = padj <.1) %>% 
+ggplot+
+  geom_point(aes(sign.nc, sign.pc, col=sign.nc), size=.1, position= "jitter")+
+  facet_wrap(~newcluster)
 
-
-
+#look at diagnostic marker genes for different EN layers
+ggplot()+
+  geom_point(aes( ump[, 1], ump[,2] ),)
