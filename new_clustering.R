@@ -105,21 +105,21 @@ text( tapply( ump[,1], gcms, median ), tapply( ump[,2], gcms, median ), 1:20 )
 #Add new clustering to cellTable as new column
 
 cellTable <- cellTable %>%
-  add_column(newcluster = gcms)
+  mutate(newcluster = sprintf( "MC%02d", gcms) )
 
 counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
 do_DESeq_on_newcluster <- function( cluster ){
   pseudobulk <- sapply( sampleTable$sample, function(s)
     rowSums( counts[ , meta$sample == s & cellTable$newcluster==cluster, drop=FALSE ] ) )
-  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
+  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ sex+region+age+diagnosis)
   dds <- dds[ rowSums(counts(dds)) >= 10, colSums(counts(dds)) > 0 ]
   dds <- DESeq( dds )
-  results(dds)
+  dds
 }
 
 plan( multiprocess, workers=20 )
-results_nc <- future_map( unique(cellTable$newcluster), do_DESeq_on_newcluster )
-names(results_nc) <- unique(cellTable$newcluster)
+dds_nc <- future_map( sort( setdiff( unique(cellTable$newcluster), "MC18") ), do_DESeq_on_newcluster )
+names(dds_nc) <- sort( setdiff( unique(cellTable$newcluster), "MC18") )
       
 genenames <- tibble( ensg = h5read("ASD.h5", "matrix/genes"), 
         name = h5read("ASD.h5", "matrix/gene_names") )
@@ -129,6 +129,9 @@ res.paper <- read.delim("~/sds/sd17l002/u/isabel/S4.csv", sep=";", dec = ",") %>
 res.tibble <- map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
   left_join( genenames, by=c( "gene" = "ensg" ) ) #%>%
   #filter( .$padj < .1 )
+
+res.nc <- map_dfr( dds_nc, function(x) x %>% results %>% as_tibble( rownames="gene" ), .id="newcluster" ) %>%
+  left_join( genenames, by=c( "gene" = "ensg" ) )
  
 
 #Plot that relates significance from DESeq output to MAST output
@@ -152,5 +155,28 @@ ggplot+
   facet_wrap(~newcluster)
 
 #look at diagnostic marker genes for different EN layers
-ggplot()+
-  geom_point(aes( ump[, 1], ump[,2] ),)
+  ggplot()+
+    geom_point(aes( ump[, 1], ump[,2] ,col= raw["TLE4", ]/cs), size=.01 )+
+    scale_color_gradientn(colours = rev(rje::cubeHelix(100)), trans="sqrt")+
+    geom_text( aes( tapply( ump[,1], cellTable$cluster, median ), 
+                    tapply( ump[,2], cellTable$cluster, median ), 
+        label=levels(factor(cellTable$cluster)) ), data=NULL )
+  
+  
+  
+#Plot for Bag3 ASD vs Normal
+k <-   tibble(NONO = raw["NONO", ], cell=meta$cell, fracMT=raw["MTND2P28", ]/cs , 
+              BAG3 = raw["BAG3", ], fracNONO= raw["NONO", ]/cs, newcluster=cellTable$newcluster)%>%
+         left_join(meta, by="cell")
+
+  
+ggplot(k, aes(k$fracMT, k$diagnosis, col=k$diagnosis))+
+  geom_point( position = "jitter", size=.1)+
+  facet_wrap(~k$sample)
+  
+  ggplot(k, aes(sqrt(k$fracNONO), k$sample, col=k$diagnosis))+
+    geom_point( position = "jitter", size=.1)+
+    facet_wrap(~k$newcluster)
+  
+  k %>% filter(newcluster=="MC08") %>% group_by(sample, diagnosis) %>% 
+    summarise(y=mean(sqrt(fracNONO)>0.01) ) %>% ggplot() + geom_point(aes(x=diagnosis, y=y ))

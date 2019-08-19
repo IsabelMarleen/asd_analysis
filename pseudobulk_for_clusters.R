@@ -21,7 +21,7 @@ counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
 do_DESeq_on_cluster <- function( cluster ){
   pseudobulk <- sapply( sampleTable$sample, function(s)
     rowSums( counts[ , meta$sample == s & cellTable$cluster==cluster, drop=FALSE ] ) )
-  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
+  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ age+region+sex+diagnosis)
   dds <- dds[ rowSums(counts(dds)) >= 10, colSums(counts(dds)) > 0 ]
   dds <- DESeq( dds )
   results(dds)
@@ -42,13 +42,13 @@ map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
 #Paper clusters
 map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
   group_by( cluster ) %>%
-  summarise( ngincl = sum( padj < .1, na.rm=TRUE ) ) %>% #no. of genes in cluster
+  summarise( ngincl = sum( padj < .1, na.rm=TRUE ) ) %>% #no. of signif genes in cluster
   arrange( -ngincl )
 
 #Manual Clusters
 map_dfr( results_nc, as_tibble, rownames="gene", .id="newcluster" ) %>%
   group_by( newcluster ) %>%
-  summarise( nginncl = sum( padj < .1, na.rm=TRUE ) ) %>% #no. of genes in new cluster
+  summarise( nginncl = sum( padj < .1, na.rm=TRUE ) ) %>% #no. of signif. genes in new cluster
   arrange( -nginncl )
 
 #Table of padj of genes in DESeq and MAST
