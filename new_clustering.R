@@ -216,6 +216,16 @@ ggplot(k, aes( k$fracMT, k$diagnosis, col=k$diagnosis ) )+
     summarise(location = multimode::locmodes( sqrt( fracTTF2 ), 2 )$location[2]) %>%
     right_join(k)
  
+#
+  l <- k%>%
+    filter(newcluster=="MC08") %>%
+    mutate(NONO=NONO+runif(n(),0,.4))
+ ggplot()+
+   geom_point( aes( log10( cs ), sqrt( NONO ) ), size=.2, data=select(l, NONO, cs), col="grey" )+
+    geom_point(aes(log10( cs ), sqrt( NONO ), col=diagnosis ), size=.2, data=l)+
+   facet_wrap(~sample)
  
  
+ k %>% filter( newcluster=="MC08" ) %>% group_by( diagnosis, sample ) %>% 
+   summarise( m = mean( fracNONO ) ) %>% ggplot + geom_point(aes(x=sample,y=m,col=diagnosis))
   
