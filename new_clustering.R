@@ -105,26 +105,96 @@ text( tapply( ump[,1], gcms, median ), tapply( ump[,2], gcms, median ), 1:20 )
 #Add new clustering to cellTable as new column
 
 cellTable <- cellTable %>%
-  add_column(newcluster = gcms)
+  mutate(newcluster = sprintf( "MC%02d", gcms) )
 
+#Relate new clusters to old clusters
+tibble(clusterkey= c("Oligodendrocytes", "L4 / L5/6-CC", "OPC", 
+                     "Astrocytes", "Neu NRGN", "L2/3 / Neumat", "Astrocytes", 
+                     "IN-PV", "IN-SST", "IN-VIP / IN-SV2C", "L5/6", "L5/6",
+                     "Endothelial", "IN-PV", "Microglia", "L5/6-CC", "L4",
+                     "AST-PP", "IN-SV2C") , newcluster = sort(unique(cellTable$newcluster))) %>%
+  right_join(cellTable, by="newcluster")
+
+
+counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
 do_DESeq_on_newcluster <- function( cluster ){
   pseudobulk <- sapply( sampleTable$sample, function(s)
-    rowSums( counts[ , cellinfo$sample == s & cellTable$newcluster==cluster, drop=FALSE ] ) )
-  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ diagnosis)
+    rowSums( counts[ , meta$sample == s & cellTable$newcluster==cluster, drop=FALSE ] ) )
+  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ sex+region+age+diagnosis)
   dds <- dds[ rowSums(counts(dds)) >= 10, colSums(counts(dds)) > 0 ]
   dds <- DESeq( dds )
-  results(dds)
+  dds
 }
 
 plan( multiprocess, workers=20 )
-results_nc <- future_map( unique(cellTable$newcluster), do_DESeq_on_newcluster )
-names(results_nc) <- unique(cellTable$newcluster)
+dds_nc <- future_map( sort( setdiff( unique(cellTable$newcluster), "MC18") ), do_DESeq_on_newcluster )
+names(dds_nc) <- sort( setdiff( unique(cellTable$newcluster), "MC18") )
       
 genenames <- tibble( ensg = h5read("ASD.h5", "matrix/genes"), 
-        name = h5read("ASD.h5", "matrix/gene_names") )  
-res.tibble <- map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
-  left_join( genenames, by=c( "gene" = "ensg" ) ) %>%
-  filter( .$padj < .1 )
+        name = h5read("ASD.h5", "matrix/gene_names") )
+res.paper <- read.delim("~/sds/sd17l002/u/isabel/S4.csv", sep=";", dec = ",") %>%
+  select(cluster = Cell.type, gene = gene.ID, name=Gene.name, q.value)
 
-res.paper <- read.delim("/home/Isabel/Desktop/ASD/S4.csv", sep=";", dec = ",")
+res.tibble <- map_dfr( dds, as_tibble, rownames="gene", .id="cluster" ) %>%
+  left_join( genenames, by=c( "gene" = "ensg" ) ) #%>%
+  #filter( .$padj < .1 )
 
+res.nc <- map_dfr( dds_nc, function(x) x %>% results %>% as_tibble( rownames="gene" ), .id="newcluster" ) %>%
+  left_join( genenames, by=c( "gene" = "ensg" ) )
+ 
+
+#Plot that relates significance from DESeq output to MAST output
+res.tibble %>%
+  left_join(res.paper)%>%
+  mutate(signif.DESeq = !is.na(padj) & padj < .05, 
+         signif.MAST = !is.na(q.value) & q.value <.05) %>% 
+  ggplot+
+      geom_point(aes(signif.MAST, signif.DESeq, col=signif.DESeq), size=.1, position= "jitter")+
+      facet_wrap(~cluster)
+
+#Plot that compares DESeq on manual clusters and paper clusters
+#Currently this plots all genes, which takes long and is not very smart
+res.nc %>%
+  mutate(padjnc = .$padj,
+            padj=NULL) %>%
+  left_join(res.tibble, by="gene")%>%
+  mutate(sign.nc = padjnc < .1, sign.pc = padj <.1) %>% 
+ggplot+
+  geom_point(aes(sign.nc, sign.pc, col=sign.nc), size=.1, position= "jitter")+
+  facet_wrap(~newcluster)
+
+#look at diagnostic marker genes for different EN layers
+  ggplot()+
+    geom_point(aes( ump[, 1], ump[,2] ,col= raw["TLE4", ]/cs), size=.01 )+
+    scale_color_gradientn(colours = rev(rje::cubeHelix(100)), trans="sqrt")+
+    geom_text( aes( tapply( ump[,1], cellTable$cluster, median ), 
+                    tapply( ump[,2], cellTable$cluster, median ), 
+        label=levels(factor(cellTable$cluster)) ), data=NULL )
+  
+  
+  
+#Plot for Bag3 ASD vs Normal
+k <-   tibble( NONO = raw[ "NONO", ], cell = meta$cell, fracMT = raw[ "MTND2P28", ]/cs , 
+              BAG3 = raw[ "BAG3", ], GJA1 = raw[ "GJA1", ], fracNONO = raw[ "NONO", ]/cs, 
+              fracGJA1 = raw[ "GJA1", ]/cs, TCF25 = raw[ "TCF25", ], fracTCF25 = raw[ "TCF25", ], 
+              TTF2 = raw["TTF2", ], fracTTF2 = raw["TTF2", ]/cs,
+              newcluster = cellTable$newcluster, clusterkey = cellTable$clusterkey )%>%
+         left_join( meta, by="cell" )
+
+  
+ggplot(k, aes(k$fracMT, k$diagnosis, col=k$diagnosis))+
+  geom_point( position = "jitter", size=.1)+
+  facet_wrap(~k$sample)
+  
+  ggplot(k, aes(sqrt(k$fracNONO), k$sample, col=k$diagnosis))+
+    geom_point( position = "jitter", size=.1)+
+    facet_wrap(~k$newcluster)
+  
+  k %>% filter(newcluster=="MC08") %>% group_by(sample, diagnosis) %>% 
+    summarise(y=mean(sqrt(fracNONO)>0.01) ) %>% ggplot() + geom_point(aes(x=diagnosis, y=y ))
+  
+  
+  k %>% add_column(cs) %>% filter(newcluster=="MC06") %>% mutate(y=TTF2+runif(n(), 0, .5))%>% 
+    ggplot() + 
+    geom_point(aes(x=log10(cs),y=y,col=diagnosis), size=.2) + 
+    scale_y_continuous(trans="sqrt")
