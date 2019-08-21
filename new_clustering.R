@@ -186,21 +186,26 @@ ggplot(k, aes( k$fracMT, k$diagnosis, col=k$diagnosis ) )+
   geom_point( position = "jitter", size=.1 )+
   facet_wrap( ~k$sample )
   
-  ggplot(k, aes( sqrt( k$fracNONO ), k$sample, col=k$diagnosis ) )+
+ggplot(k, aes( sqrt( k$fracNONO ), k$sample, col=k$diagnosis ) )+
     geom_point( position = "jitter", size=.1 )+
     facet_wrap( ~k$newcluster )
   
-  k  %>% group_by( sample, diagnosis, newcluster, location ) %>% 
-    summarise( y=mean( sqrt( fracTTF2 ) > location ) ) %>% 
-    ggplot() + 
-    geom_point( aes( x=diagnosis, y=y ) )+
-    facet_wrap(~newcluster)
+k  %>% 
+  group_by( sample, diagnosis, newcluster, cs ) %>% 
+  filter(newcluster=="MC08", log10(cs) > 3.5 ) %>%
+  summarise( y=mean( sqrt( NONO ) > 1  ) ) %>% 
+  ggplot() + 
+  geom_point( aes( x=diagnosis, y=y ), position="jitter", size=.2 )+
+  facet_wrap(~newcluster)
   
   
-  k %>% add_column(cs) %>% filter(newcluster=="MC19") %>% mutate( y=TTF2+runif( n(), 0, .5) )%>% 
-    ggplot() + 
-    geom_point(aes(x=log10(cs),y=y,col=diagnosis), size=.2) + 
-    scale_y_continuous(trans="sqrt")
+k %>% 
+  #add_column(cs) %>% 
+  filter(newcluster=="MC08") %>% 
+  mutate( y=NONO+runif( n(), 0, .5) )%>% 
+  ggplot() + 
+  geom_point(aes(x=log10(cs),y=y,col=diagnosis), size=.2) + 
+  scale_y_continuous(trans="sqrt")
 
   
   k %>% add_column( cs ) %>% 
@@ -226,6 +231,12 @@ ggplot(k, aes( k$fracMT, k$diagnosis, col=k$diagnosis ) )+
    facet_wrap(~sample)
  
  
- k %>% filter( newcluster=="MC08" ) %>% group_by( diagnosis, sample ) %>% 
-   summarise( m = mean( fracNONO ) ) %>% ggplot + geom_point(aes(x=sample,y=m,col=diagnosis))
+ k %>% 
+   filter( newcluster=="MC08" ) %>% 
+   group_by( diagnosis, sample ) %>% 
+   summarise( m = mean( fracNONO ) ) %>% 
+   ggplot + 
+   geom_point(aes(x=sample,y=m,col=diagnosis))
+ 
+ h <- res.nc %>% filter(newcluster== "MC05" & padj < .1) %>% select(name)
   
