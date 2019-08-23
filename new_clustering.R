@@ -238,5 +238,51 @@ k %>%
    ggplot + 
    geom_point(aes(x=sample,y=m,col=diagnosis))
  
- h <- res.nc %>% filter(newcluster== "MC05" & padj < .1) %>% select(name)
+
   
+#Look at GO
+ library(topGO)
+ h <- res.nc %>% filter(newcluster== "MC01" & baseMean > 5) %>% dplyr::pull( log2FoldChange )
+ k <- res.nc %>% filter(newcluster== "MC01" & baseMean > 5) %>% dplyr::pull( gene )
+ #Instead of filtering baseMean, excluding genes with padj of NA also works
+
+ ## feature 1: numeric vector
+ geneList <- h
+ 
+ ## feature 2: named vector
+ names(geneList) <- as.character(k)
+ gene <- res.nc %>% filter(newcluster == "MC05" & padj<.1 & log2FoldChange >0)  %>% pull(gene)
+ 
+ ## feature 3: decreasing order
+ geneList <- sort(geneList, decreasing = TRUE)
+
+ ego <- enrichGO(gene         = gene,
+                  universe      = names(geneList),
+                  OrgDb         = org.Hs.eg.db,
+                  keyType       = 'ENSEMBL',
+                  ont           = "BP",
+                  pAdjustMethod = "BH",
+                  pvalueCutoff  = 0.01,
+                  qvalueCutoff  = 0.05)
+ego
+
+#Transcribe Ensemble to go id or likewise
+mart <- useMart("ensembl", "hsapiens_gene_ensembl")
+a <- getBM( c("ensembl_gene_id","go_id"), mart=mart )
+
+#Look at overlap to GWAS Studies
+SFARI <- read.csv("~/sds/sd17l002/u/isabel/SFARI-Gene_genes_08-20-2019release_08-23-2019export.csv")
+
+s <- res.nc %>%
+  filter(padj < .1 & !is.na(padj) ) %>%
+  dplyr::pull(name) %>%
+intersect(SFARI$gene.symbol)
+ 
+
+res.nc%>%
+  filter(res.nc$name %in% s & !is.na(padj) & padj <.1 ) %>%
+  View()
+SFARI %>%
+  as_tibble() %>%
+  filter(gene.symbol %in% s) %>%
+  View()
