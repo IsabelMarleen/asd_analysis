@@ -1,3 +1,4 @@
+#Libraries
 library( Matrix )
 library( tidyverse )
 library( rhdf5 )
@@ -105,15 +106,15 @@ text( tapply( ump[,1], gcms, median ), tapply( ump[,2], gcms, median ), 1:20 )
 #Add new clustering to cellTable as new column
 
 cellTable <- cellTable %>%
-  mutate(newcluster = sprintf( "MC%02d", gcms) )
+  mutate( newcluster = sprintf( "MC%02d", gcms ) )
 
 #Relate new clusters to old clusters
-tibble(clusterkey= c("Oligodendrocytes", "L4 / L5/6-CC", "OPC", 
+tibble( clusterkey= c( "Oligodendrocytes", "L4 / L5/6-CC", "OPC", 
                      "Astrocytes", "Neu NRGN", "L2/3 / Neumat", "Astrocytes", 
                      "IN-PV", "IN-SST", "IN-VIP / IN-SV2C", "L5/6", "L5/6",
                      "Endothelial", "IN-PV", "Microglia", "L5/6-CC", "L4",
-                     "AST-PP", "IN-SV2C") , newcluster = sort(unique(cellTable$newcluster))) %>%
-  right_join(cellTable, by="newcluster")
+                     "AST-PP", "IN-SV2C" ) , newcluster = sort( unique( cellTable$newcluster ) ) ) %>%
+  right_join( cellTable, by="newcluster" )
 
 
 counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
@@ -127,13 +128,13 @@ do_DESeq_on_newcluster <- function( cluster ){
 }
 
 plan( multiprocess, workers=20 )
-dds_nc <- future_map( sort( setdiff( unique(cellTable$newcluster), "MC18") ), do_DESeq_on_newcluster )
-names(dds_nc) <- sort( setdiff( unique(cellTable$newcluster), "MC18") )
+dds_nc <- future_map( sort( setdiff( unique( cellTable$newcluster ), "MC18" ) ), do_DESeq_on_newcluster )
+names( dds_nc ) <- sort( setdiff( unique( cellTable$newcluster ), "MC18" ) )
       
-genenames <- tibble( ensg = h5read("ASD.h5", "matrix/genes"), 
-        name = h5read("ASD.h5", "matrix/gene_names") )
-res.paper <- read.delim("~/sds/sd17l002/u/isabel/S4.csv", sep=";", dec = ",") %>%
-  select(cluster = Cell.type, gene = gene.ID, name=Gene.name, q.value)
+genenames <- tibble( ensg = h5read( "ASD.h5", "matrix/genes" ), 
+        name = h5read( "ASD.h5", "matrix/gene_names" ) )
+res.paper <- read.delim( "~/sds/sd17l002/u/isabel/S4.csv", sep=";", dec = "," ) %>%
+  select( cluster = Cell.type, gene = gene.ID, name=Gene.name, q.value )
 
 res.tibble <- map_dfr( dds, as_tibble, rownames="gene", .id="cluster" ) %>%
   left_join( genenames, by=c( "gene" = "ensg" ) ) #%>%
@@ -145,35 +146,34 @@ res.nc <- map_dfr( dds_nc, function(x) x %>% results %>% as_tibble( rownames="ge
 
 #Plot that relates significance from DESeq output to MAST output
 res.tibble %>%
-  left_join(res.paper)%>%
-  mutate(signif.DESeq = !is.na(padj) & padj < .05, 
-         signif.MAST = !is.na(q.value) & q.value <.05) %>% 
+  left_join( res.paper )%>%
+  mutate(signif.DESeq = !is.na( padj ) & padj < .05, 
+         signif.MAST = !is.na( q.value ) & q.value <.05 ) %>% 
   ggplot+
-      geom_point(aes(signif.MAST, signif.DESeq, col=signif.DESeq), size=.1, position= "jitter")+
-      facet_wrap(~cluster)
+      geom_point( aes(signif.MAST, signif.DESeq, col=signif.DESeq ), size=.1, position= "jitter" )+
+      facet_wrap( ~cluster )
 
 #Plot that compares DESeq on manual clusters and paper clusters
 #Currently this plots all genes, which takes long and is not very smart
 res.nc %>%
-  mutate(padjnc = .$padj,
-            padj=NULL) %>%
-  left_join(res.tibble, by="gene")%>%
-  mutate(sign.nc = padjnc < .1, sign.pc = padj <.1) %>% 
+  mutate( padjnc = .$padj,
+            padj=NULL ) %>%
+  left_join( res.tibble, by="gene" )%>%
+  mutate( sign.nc = padjnc < .1, sign.pc = padj <.1 ) %>% 
 ggplot+
-  geom_point(aes(sign.nc, sign.pc, col=sign.nc), size=.1, position= "jitter")+
-  facet_wrap(~newcluster)
+  geom_point( aes( sign.nc, sign.pc, col=sign.nc ), size=.1, position= "jitter" )+
+  facet_wrap( ~newcluster )
 
 #look at diagnostic marker genes for different EN layers
   ggplot()+
-    geom_point(aes( ump[, 1], ump[,2] ,col= raw["TLE4", ]/cs), size=.01 )+
-    scale_color_gradientn(colours = rev(rje::cubeHelix(100)), trans="sqrt")+
+    geom_point( aes( ump[, 1], ump[,2], col= raw[ "TLE4", ]/cs ), size=.01 )+
+    scale_color_gradientn( colours = rev( rje::cubeHelix( 100 ) ), trans="sqrt" )+
     geom_text( aes( tapply( ump[,1], cellTable$cluster, median ), 
                     tapply( ump[,2], cellTable$cluster, median ), 
-        label=levels(factor(cellTable$cluster)) ), data=NULL )
+              label=levels( factor( cellTable$cluster ) ) ), data=NULL )
   
   
-  
-#Plot for Bag3 ASD vs Normal
+#Temporary object with raw and normalised counts
 k <-   tibble( NONO = raw[ "NONO", ], cell = meta$cell, fracMT = raw[ "MTND2P28", ]/cs , 
               BAG3 = raw[ "BAG3", ], GJA1 = raw[ "GJA1", ], fracNONO = raw[ "NONO", ]/cs, 
               fracGJA1 = raw[ "GJA1", ]/cs, TCF25 = raw[ "TCF25", ], fracTCF25 = raw[ "TCF25", ], 
@@ -181,20 +181,108 @@ k <-   tibble( NONO = raw[ "NONO", ], cell = meta$cell, fracMT = raw[ "MTND2P28"
               newcluster = cellTable$newcluster, clusterkey = cellTable$clusterkey )%>%
          left_join( meta, by="cell" )
 
+
+ggplot(k, aes( k$fracMT, k$diagnosis, col=k$diagnosis ) )+
+  geom_point( position = "jitter", size=.1 )+
+  facet_wrap( ~k$sample )
   
-ggplot(k, aes(k$fracMT, k$diagnosis, col=k$diagnosis))+
-  geom_point( position = "jitter", size=.1)+
-  facet_wrap(~k$sample)
+ggplot(k, aes( sqrt( k$fracNONO ), k$sample, col=k$diagnosis ) )+
+    geom_point( position = "jitter", size=.1 )+
+    facet_wrap( ~k$newcluster )
   
-  ggplot(k, aes(sqrt(k$fracNONO), k$sample, col=k$diagnosis))+
-    geom_point( position = "jitter", size=.1)+
-    facet_wrap(~k$newcluster)
+k  %>% 
+  group_by( sample, diagnosis, newcluster, cs ) %>% 
+  filter(newcluster=="MC08", log10(cs) > 3.5 ) %>%
+  summarise( y=mean( sqrt( NONO ) > 1  ) ) %>% 
+  ggplot() + 
+  geom_point( aes( x=diagnosis, y=y ), position="jitter", size=.2 )+
+  facet_wrap(~newcluster)
   
-  k %>% filter(newcluster=="MC08") %>% group_by(sample, diagnosis) %>% 
-    summarise(y=mean(sqrt(fracNONO)>0.01) ) %>% ggplot() + geom_point(aes(x=diagnosis, y=y ))
   
+k %>% 
+  #add_column(cs) %>% 
+  filter(newcluster=="MC08") %>% 
+  mutate( y=NONO+runif( n(), 0, .5) )%>% 
+  ggplot() + 
+  geom_point(aes(x=log10(cs),y=y,col=diagnosis), size=.2) + 
+  scale_y_continuous(trans="sqrt")
+
   
-  k %>% add_column(cs) %>% filter(newcluster=="MC06") %>% mutate(y=TTF2+runif(n(), 0, .5))%>% 
-    ggplot() + 
-    geom_point(aes(x=log10(cs),y=y,col=diagnosis), size=.2) + 
-    scale_y_continuous(trans="sqrt")
+  k %>% add_column( cs ) %>% 
+    #filter( newcluster=="MC06" ) %>%
+    {ggplot(.)+
+    geom_density( aes( sqrt( .$fracTTF2 ), col=.$diagnosis ) )+
+    geom_vline( xintercept = .$location ) +
+    facet_wrap(~.$newcluster)}
+  
+#Implementing locmodes to see if that can produce sensible cut-point
+  k <- k %>%
+    group_by(newcluster) %>%
+    summarise(location = multimode::locmodes( sqrt( fracTTF2 ), 2 )$location[2]) %>%
+    right_join(k)
+ 
+#
+  l <- k%>%
+    filter(newcluster=="MC08") %>%
+    mutate(NONO=NONO+runif(n(),0,.4))
+ ggplot()+
+   geom_point( aes( log10( cs ), sqrt( NONO ) ), size=.2, data=select(l, NONO, cs), col="grey" )+
+    geom_point(aes(log10( cs ), sqrt( NONO ), col=diagnosis ), size=.2, data=l)+
+   facet_wrap(~sample)
+ 
+ 
+ k %>% 
+   filter( newcluster=="MC08" ) %>% 
+   group_by( diagnosis, sample ) %>% 
+   summarise( m = mean( fracNONO ) ) %>% 
+   ggplot + 
+   geom_point(aes(x=sample,y=m,col=diagnosis))
+ 
+
+  
+#Look at GO
+ library(topGO)
+ h <- res.nc %>% filter(newcluster== "MC01" & baseMean > 5) %>% dplyr::pull( log2FoldChange )
+ k <- res.nc %>% filter(newcluster== "MC01" & baseMean > 5) %>% dplyr::pull( gene )
+ #Instead of filtering baseMean, excluding genes with padj of NA also works
+
+ ## feature 1: numeric vector
+ geneList <- h
+ 
+ ## feature 2: named vector
+ names(geneList) <- as.character(k)
+ gene <- res.nc %>% filter(newcluster == "MC05" & padj<.1 & log2FoldChange >0)  %>% pull(gene)
+ 
+ ## feature 3: decreasing order
+ geneList <- sort(geneList, decreasing = TRUE)
+
+ ego <- enrichGO(gene         = gene,
+                  universe      = names(geneList),
+                  OrgDb         = org.Hs.eg.db,
+                  keyType       = 'ENSEMBL',
+                  ont           = "BP",
+                  pAdjustMethod = "BH",
+                  pvalueCutoff  = 0.01,
+                  qvalueCutoff  = 0.05)
+ego
+
+#Transcribe Ensemble to go id or likewise
+mart <- useMart("ensembl", "hsapiens_gene_ensembl")
+a <- getBM( c("ensembl_gene_id","go_id"), mart=mart )
+
+#Look at overlap to GWAS Studies
+SFARI <- read.csv("~/sds/sd17l002/u/isabel/SFARI-Gene_genes_08-20-2019release_08-23-2019export.csv")
+
+s <- res.nc %>%
+  filter(padj < .1 & !is.na(padj) ) %>%
+  dplyr::pull(name) %>%
+intersect(SFARI$gene.symbol)
+ 
+
+res.nc%>%
+  filter(res.nc$name %in% s & !is.na(padj) & padj <.1 ) %>%
+  View()
+SFARI %>%
+  as_tibble() %>%
+  filter(gene.symbol %in% s) %>%
+  View()

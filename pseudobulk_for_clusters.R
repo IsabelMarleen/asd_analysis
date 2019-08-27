@@ -21,33 +21,34 @@ counts <- TENxMatrix( "/home/anders/pub/ASD.h5", "matrix" )
 do_DESeq_on_cluster <- function( cluster ){
   pseudobulk <- sapply( sampleTable$sample, function(s)
     rowSums( counts[ , meta$sample == s & cellTable$cluster==cluster, drop=FALSE ] ) )
-  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ age+region+sex+diagnosis)
-  dds <- dds[ rowSums(counts(dds)) >= 10, colSums(counts(dds)) > 0 ]
+  dds <- DESeqDataSetFromMatrix( pseudobulk, sampleTable, ~ age+region+sex+diagnosis )
+  dds <- dds[ rowSums(counts(dds)) >= 10, colSums( counts( dds ) ) > 0 ]
   dds <- DESeq( dds )
-  results(dds)
+  results( dds )
 }
 
 plan( multiprocess, workers=20 )
-results <- future_map( unique(cellTable$cluster), do_DESeq_on_cluster )
-names(results) <- unique(cellTable$cluster)
+dds <- future_map( unique( cellTable$cluster ), do_DESeq_on_cluster )
+names( dds ) <- unique( cellTable$cluster )
 
 map_dbl( results, ~ sum( .$padj<.1, na.rm=TRUE ) )
 
-map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
+res.tibble %>%
   group_by( gene ) %>%
   summarise( nclsig = sum( padj < .1, na.rm=TRUE ) ) %>%
   arrange( -nclsig )
 
 #How many genes below FDR of 10% in each cluster?
 #Paper clusters
-map_dfr( results, as_tibble, rownames="gene", .id="cluster" ) %>%
+res.tibble %>%
   group_by( cluster ) %>%
   summarise( ngincl = sum( padj < .1, na.rm=TRUE ) ) %>% #no. of signif genes in cluster
   arrange( -ngincl )
 
 #Manual Clusters
-map_dfr( results_nc, as_tibble, rownames="gene", .id="newcluster" ) %>%
-  group_by( newcluster ) %>%
+res.nc %>%
+  left_join(clusterkey) %>%
+  group_by( newcluster, clusterkey ) %>%
   summarise( nginncl = sum( padj < .1, na.rm=TRUE ) ) %>% #no. of signif. genes in new cluster
   arrange( -nginncl )
 
