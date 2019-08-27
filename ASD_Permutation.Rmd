@@ -142,7 +142,7 @@ and this shuffled table can be easily added to the 'cellinfo' table as extra col
 sce_perm <- sce
 colData(sce_perm)$diagnosis_perm <-
   left_join(         
-     as.data.frame(colData(sca_perm)),
+     as.data.frame(colData(sca)),
      diagn %>% mutate( diagnosis_perm = sample(diagnosis) ) )$diagnosis_perm
 ```
 
@@ -171,7 +171,7 @@ for (i in 1:n_perm) {
   sce_perm <- sce
   colData(sce_perm)$diagnosis_perm <-
     left_join(         
-      as.data.frame(colData(sca_perm)),
+      as.data.frame(colData(sca)),
       diagn %>% mutate( diagnosis_perm = sample(diagnosis) ) )$diagnosis_perm
 
   zlm_fit_perm <- MAST::zlm( 
@@ -204,7 +204,7 @@ plot(
   -log10( sort( pvalues_perm ) ), 
   main="QQ Plot", 
   xlab="-log10 of evenly-spaced points", 
-  ylab="-log10 of p-values from permutations" )
+  ylab="-log10 of p-values from MAST permutations" )
 abline(0,1)
 ```
 
