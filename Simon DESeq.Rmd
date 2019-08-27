@@ -49,7 +49,7 @@ pseudobulk_L23[ 1:5, 1:5 ]
 Run DESeq on the pseudobulk. 
 
 ```{r}
-dds <- DESeqDataSetFromMatrix( pseudobulk_L23, sampleTable, ~ diagnosis )
+dds <- DESeqDataSetFromMatrix( pseudobulk_L23, sampleTable, ~ age + sex + region + diagnosis )
 dds <- DESeq( dds )
 res <- results( dds )
 ```

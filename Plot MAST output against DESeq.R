@@ -29,7 +29,8 @@ res2[order(res$padj), ]
 colnames(res2) <- c("baseMean2", "log2FoldChange2", "lfcSE2", "stat2", "pvalue2", "padj2")
 results_joined <- left_join(as_tibble(res2, rownames="Gene.name"), 
                             as_tibble(res, rownames="Gene.name"))
-plot(log10(results_joined$padj), log10(results_joined$padj2), xlab="Sorting by Paper", ylab="Sorting by HS6ST3")
+plot(log10(results_joined$padj), log10(results_joined$padj2), xlab="Sorting by Paper", 
+     ylab="Sorting by HS6ST3")
 abline(0,1)
 
 all(rownames(res[order(res$padj), ]) %in% rownames(res2[order(res$padj), ]))

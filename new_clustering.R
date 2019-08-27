@@ -11,7 +11,7 @@ readTENxH5File <- function( filename )
     x = as.numeric( h5read( filename, "matrix/data" ) ),
     dims = h5read( filename, "matrix/shape" ),
     dimnames = list(
-      as.vector( h5read( filename, "matrix/gene_names" ) ),
+      as.vector( h5read( filename, "matrix/gene_names" ) ), 
       as.vector( h5read( filename, "matrix/barcodes" ) )
     )
   )
@@ -201,7 +201,7 @@ k  %>%
   
 k %>% 
   #add_column(cs) %>% 
-  filter(newcluster=="MC08") %>% 
+  dplyr::filter(newcluster=="MC08") %>% 
   mutate( y=NONO+runif( n(), 0, .5) )%>% 
   ggplot() + 
   geom_point(aes(x=log10(cs),y=y,col=diagnosis), size=.2) + 
@@ -223,27 +223,29 @@ k %>%
  
 #
   l <- k%>%
-    filter(newcluster=="MC08") %>%
+    dplyr::filter(newcluster=="MC08") %>%
     mutate(NONO=NONO+runif(n(),0,.4))
  ggplot()+
-   geom_point( aes( log10( cs ), sqrt( NONO ) ), size=.2, data=select(l, NONO, cs), col="grey" )+
+   geom_point( aes( log10( cs ), sqrt( NONO ) ), size=.2, data=dplyr::select(l, NONO, cs), col="grey" )+
     geom_point(aes(log10( cs ), sqrt( NONO ), col=diagnosis ), size=.2, data=l)+
    facet_wrap(~sample)
  
  
  k %>% 
-   filter( newcluster=="MC08" ) %>% 
+   dplyr::filter( newcluster=="MC08" ) %>% 
    group_by( diagnosis, sample ) %>% 
    summarise( m = mean( fracNONO ) ) %>% 
    ggplot + 
-   geom_point(aes(x=sample,y=m,col=diagnosis))
+   geom_point(aes(x=sample,y=m,col=diagnosis))+
+   theme(axis.text.x = element_text(angle = 90))
  
 
   
 #Look at GO
- library(topGO)
- h <- res.nc %>% filter(newcluster== "MC01" & baseMean > 5) %>% dplyr::pull( log2FoldChange )
- k <- res.nc %>% filter(newcluster== "MC01" & baseMean > 5) %>% dplyr::pull( gene )
+ library(clusterProfiler)
+ cluster <- "MC18"
+ h <- res.nc %>% dplyr::filter(newcluster== cluster & baseMean > 5) %>% dplyr::pull( log2FoldChange )
+ k <- res.nc %>% dplyr::filter(newcluster== cluster & baseMean > 5) %>% dplyr::pull( gene )
  #Instead of filtering baseMean, excluding genes with padj of NA also works
 
  ## feature 1: numeric vector
@@ -251,7 +253,7 @@ k %>%
  
  ## feature 2: named vector
  names(geneList) <- as.character(k)
- gene <- res.nc %>% filter(newcluster == "MC05" & padj<.1 & log2FoldChange >0)  %>% pull(gene)
+ gene <- res.nc %>% dplyr::filter(newcluster == cluster & padj<.1 )  %>% pull(gene)
  
  ## feature 3: decreasing order
  geneList <- sort(geneList, decreasing = TRUE)
@@ -274,15 +276,15 @@ a <- getBM( c("ensembl_gene_id","go_id"), mart=mart )
 SFARI <- read.csv("~/sds/sd17l002/u/isabel/SFARI-Gene_genes_08-20-2019release_08-23-2019export.csv")
 
 s <- res.nc %>%
-  filter(padj < .1 & !is.na(padj) ) %>%
+  dplyr::filter(padj < .1 & !is.na(padj) ) %>%
   dplyr::pull(name) %>%
 intersect(SFARI$gene.symbol)
  
 
 res.nc%>%
-  filter(res.nc$name %in% s & !is.na(padj) & padj <.1 ) %>%
+  dplyr::filter(res.nc$name %in% s & !is.na(padj) & padj <.1 ) %>%
   View()
 SFARI %>%
   as_tibble() %>%
-  filter(gene.symbol %in% s) %>%
+  dplyr::filter(gene.symbol %in% s) %>%
   View()

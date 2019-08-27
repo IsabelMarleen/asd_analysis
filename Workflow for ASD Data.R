@@ -10,6 +10,7 @@ library( locfit )
 library( purrr )
 library( furrr )
 library( tidyverse )
+library(MAST)
 source( "spmvar.R" )
 
 #Load data
@@ -39,13 +40,13 @@ calc_umap_etc <- function( samplename ) {
   cnts <- counts[ , cellinfo$cell[ cellinfo$sample==samplename ] ]
   
   #Select informative genes and do PCA
-  frac <- t(t(cnts) / colSums(cnts))
+  frac <- t( t( cnts ) / colSums( cnts ) )
   gene_means <- rowMeans( frac )
   gene_vars <- rowVars_spm( frac )
   poisson_vmr <- mean( 1 / colSums( cnts ) )
   
-  informative_genes <-  names(which(gene_vars / gene_means  >  1.5 * poisson_vmr ))
-  pca <- irlba::prcomp_irlba( t(log1p(frac[informative_genes,]/poisson_vmr)), n = 20)$x 
+  informative_genes <-  names( which( gene_vars / gene_means  >  1.5 * poisson_vmr ) )
+  pca <- irlba::prcomp_irlba( t( log1p( frac[ informative_genes, ]/poisson_vmr ) ), n = 20 )$x 
   
   #Do UMAP
   umap <- uwot::umap( pca, n_neighbors = 30, min_dist = .3, metric = "cosine" )
@@ -63,7 +64,6 @@ calc_umap_etc <- function( samplename ) {
 
 #Calculate UMAP, PCA etc for all samples  
 data <- sapply( samplenames, calc_umap_etc, simplify=FALSE )
-
 
 
 #Function that adds raw and smoothed gene expression to data
@@ -86,13 +86,14 @@ add_gene( "NFU1" )
 add_gene("COX5B")
 add_gene("TTF2")
 
+#Convert data into tibble for easier handling
 data2 <- data %>%
   bind_rows( .id="sample" ) %>%
   as_tibble 
 
 #save( data, file="data.rda" )
 
-#Create all UMAPs, whith the red colour channel being the SATB2 expression
+#UMAPs, with the red colour channel being the SATB2 expression
 #and the green one the COXB5 expression, overlapping regions are yellow
 #No systematic difference between ASD and Control samples visible
 data %>%
@@ -110,7 +111,7 @@ a %>% ggplot +
   theme_dark() + theme( plot.background = element_rect(fill="black") )
 
 
-#Create all UMAPs, whith the red colour channel being the SATB2 expression
+#UMAPs, with the red colour channel being the SATB2 expression
 #and the green one the NFU1 expression, overlapping regions are yellow
 data %>%
   bind_rows( .id="sample" ) %>% 
@@ -142,28 +143,10 @@ data %>%
   facet_wrap( ~ sample )
 
 
-
-#Not cleaned yet
-
-
-
-#Using the Multimode package to predict where the lines in the histograms need to go
-lines <- sapply( names(data), function (s) {
-  lines <- data[[s]]$smooth_SATB2
-  lines <- lines[lines<.9]
-  multimode::locmodes(lines^.15, 2 )$location
-})
-
-#modes_positions is a tibble including the positions of the three lines for each sample
-modes_positions <- lines %>% t %>% as_tibble( rownames="sample" ) %>%
-  gather( mode, pos, V1:V3 )
-
-
-
-#Use predicted lines by locfit to filter for SATB2 positive cells, including all cells
+#Using the Multimode package to predict cutoff points
+#to filter for SATB2 positive cells, including all cells
 #beyond the second peak line and 90% of cells between valley and second peak line
 
-#Creating new list
 location <- list()
 for( s in names(data) ) {
   a <- data[[s]]$smooth_SATB2
@@ -247,7 +230,7 @@ ttres3 <- genefilter::rowttests( meansL23, diagnoses )
 rownames(ttres3) <- rownames(meansL23)
 
 
-#Multiple testing correction for all cells
+#Multiple testing correction for L2/3 cells
 #Still no siginificant evidence for differences
 ttres3$padj <- p.adjust(ttres3$p.value, method="BH")
 
@@ -261,9 +244,6 @@ S4$Gene.name %in% rownames(ttres3)
 ggplot() +
   geom_point(aes(x=ttres3$dm, y=-log10(ttres3$p.value), col=rownames(ttres3)%in% S4$Gene.name)) +
   scale_x_continuous(limits=c(-0.001,0.001),oob=scales::squish)
-  
- 
-
 
 #Plot ttres against ttres2 to see whether filtering for SATB2 pos cells makes a systematic difference
 plot(ttres$p.value[1:100], ttres2$p.value[1:100], type="p")
@@ -271,31 +251,27 @@ plot(ttres$padj[1:100], ttres2$padj[1:100], type="p")
 
 
 
-#Following protocol
-#https://www.bioconductor.org/packages/release/bioc/vignettes/MAST
-#/inst/doc/MAITAnalysis.html
+#Recreating MAST analysis from Schirmer paper
+#https://www.bioconductor.org/packages/release/bioc/vignettes/MAST/inst/doc/MAITAnalysis.html
 
 # cngeneson is gene detection rate (factor recommended in MAST tutorial), 
 # Capbatch is 10X capture batch, Seqbatch is sequencing batch, ind is individual label, 
 # RIN is RNA integrity number, PMI is post-mortem interval and ribo_perc is 
 # ribosomal RNA fraction.
-#Using the MAST package in an attempt to replicate Schirmer results
+
 MAST::zlm(~diagnosis + (1|ind) + cngeneson + age + sex + RIN + PMI + 
             region + Capbatch + Seqbatch + ribo_perc, counts, method = "glmer", 
           ebayes = F, silent=T)
-
-library(MAST)
-
-counts3 <- counts
 
 f <- log1p(t(t(counts) / Matrix::colSums(counts))*10^6)
 g <- f/log(2, base=exp(1))
 
 sce <- SingleCellExperiment(assays = list(counts = g), colData= cellinfo)
 sca <- as(sce, 'SingleCellAssay')
-zlm <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
-                   region + Capbatch + Seqbatch + RNA.ribosomal.percent, sca, method = "glmer", 
-                 ebayes = F, silent=T)
+zlm <- MAST::zlm(~diagnosis + (1|individual) + genes + age + sex + RNA.Integrity.Number + 
+                   post.mortem.interval..hours. + region + Capbatch + Seqbatch + 
+                   RNA.ribosomal.percent, sca, method = "glmer", 
+                   ebayes = F, silent=T)
 
 #Fitting model only for NFU1
 
@@ -347,8 +323,8 @@ zlm_scale <- MAST::zlm( ~diagnosis + (1|ind) + genes + age + sex + RIN + PMI +
                      region + Capbatch + Seqbatch + ribo_perc, scaTTF2_scale, method = "glmer", 
                    ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 
-
 lrTest( zlm_scale, Hypothesis( "diagnosisControl" ) )
+
 
 #Permutations on scaled
 pvalue_scale <- list()
@@ -380,13 +356,14 @@ plot(-log10(ppoints(100, 0.1)), -log10(sort(unlist(pvalue_scale))))
 #Normal linear model
 meansL23
 
-sampleinfo2 <- cellinfo %>% select( sample, diagnosis, individual, age, sex, RNA.Integrity.Number, 
-                                    post.mortem.interval..hours., region, Capbatch, Seqbatch ) %>% distinct()
+sampleinfo2 <- cellinfo %>% 
+  select( sample, diagnosis, individual, age, sex, RNA.Integrity.Number, 
+          post.mortem.interval..hours., region, Capbatch, Seqbatch ) %>% 
+  distinct()
 
 fit <- limma::eBayes(limma::lmFit( meansL23[ , sampleinfo2$sample ],
-                                   model.matrix( ~ diagnosis + age + sex + RNA.Integrity.Number + post.mortem.interval..hours. + 
-                                                   region + Capbatch + Seqbatch , sampleinfo2 ) ))
-
+              model.matrix( ~ diagnosis + age + sex + RNA.Integrity.Number + 
+                              post.mortem.interval..hours. + region + Capbatch + Seqbatch , sampleinfo2 ) ))
 
 #Permutations
 
@@ -414,8 +391,6 @@ for (i in seq(1, 10, 1)) {
 }
 
 
-
-
 scaTTF2perm <- scaTTF2
 colData(scaTTF2perm) %>% as_tibble %>% left_join( by = "sample", 
    colData(scaTTF2perm) %>% as_tibble %>% dplyr::select( sample, diagnosis_old=diagnosis ) %>% 
@@ -434,8 +409,6 @@ zlm2 <- MAST::zlm(~ diagnosis + (1|individual) + genes + age + sex + RNA.Integri
                   ebayes = F, silent=T, fitArgsD = list(nAGQ = 0))
 lrTest( zlm2, Hypothesis("diagnosisControl") )
 
-
-
 #Permutations for DESeq
 pvalue <- list()
 pseudobulk_L23 <-
@@ -453,7 +426,7 @@ for (i in seq(1, 100, 1)) {
 #padj is a list of permutations when saving the adjusted p value
 
 plot(-log10(ppoints(100)), -log10(sort(unlist(pvalue))), 
-     xlab="-log10 of uniform Points", ylab="-log10 of P-Values" , main="Normal P Values")
+     xlab="-log10 of evenly-spaced points", ylab="-log10 of DESeq P-Values" , main="QQ Plot DESeq")
 abline(0, 1)
 
 plot(-log10(ppoints(100)), -log10(sort(unlist(padj))), 
