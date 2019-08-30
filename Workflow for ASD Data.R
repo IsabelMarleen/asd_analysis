@@ -433,7 +433,14 @@ plot(-log10(ppoints(100)), -log10(sort(unlist(padj))),
      xlab="-log10 of uniform Points", ylab="-log10 of P-Values" , main="Adjusted P Values")
 abline(0, 1)
 
-#Do DESeq for all different clusters and compare
+
+
+
+#Rest is unclean version of new_clustering_DESeq_GO_SFARI
+
+
+
+#Do DESeq for all different clusters and compare #Look at new_clustering_DESeq_GO_SFARI document for this
 pseudobulk_L23 <-
   sapply( sampleTable$sample, function(s)
     rowSums( counts[ , cellinfo$sample == s & cellinfo$cluster=="L2/3", drop=FALSE ] ) )
@@ -546,7 +553,7 @@ plot_hist_gene2("TTF2")
 
 
 
-##Create new clusters by using louvain--------------------------------------------------
+##Create new clusters by using louvain #Look at new_clustering_DESeq_GO_SFARI for clean version
 library(igraph)
 a <- data2 %>%
     select(2:21) %>%
