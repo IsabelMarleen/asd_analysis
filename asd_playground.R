@@ -1,10 +1,15 @@
 # This script crashes with 16 GB or less of RAM.
+# Rsession will use 30 GB or RAM in the long-run, not sure about peaks.
 
 library( tidyverse )
 library( Matrix )
 library( irlba )
 library( uwot )
+library( FNN )
+library( igraph )
 library( cowplot )
+
+# convenience functions such as col_pwr_trans, rowVars_spm etc.:
 scr_dir <- "/home/frauhammer/sc_methods_dev/src/"
 source(file.path(scr_dir, "functions_universal.R"))
 
@@ -23,8 +28,14 @@ sampleTable
 # extracting gene expression is much faster in column-sparse format:
 Tcounts <- as(t(counts), "dgCMatrix")   #  fast:   Tcounts[, "SYN1"]
 
+Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]
 
-# find informative genes
+
+
+
+
+
+# find informative genes    (rsession goes up to 25 GB RAM [htop])
 sfs <- colSums(counts)
 norm_counts <- t(t(counts) / colSums(counts))
 poisson_vmr <- mean(1/sfs)
@@ -38,13 +49,13 @@ points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch="
 
 
 
-# PCA and UMAP
+# PCA and UMAP   (goes up to 18 GB of RAM)
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
-                            n = 50,
+                            n = 40,
                             scale. = TRUE)
-umap_euc <- uwot::umap( pca$x, spread = 2)
+umap_euc <- uwot::umap( pca$x, spread = 2, n_threads = 40)
 
-umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 2)
+umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 2, n_threads = 40)
 
 
 
@@ -65,7 +76,7 @@ labels_df <- df %>% group_by(cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
 p_cl <-   ggplot() + 
   geom_point(data=df,
              aes(X1, X2, col = cluster),
-             size = .1) + coord_fixed()+
+             size = .05) + coord_fixed()+
   geom_label(data = labels_df,
              aes(X1, X2, col = cluster, label = cluster),
              fontface = "bold")+ theme(legend.position = "none")
