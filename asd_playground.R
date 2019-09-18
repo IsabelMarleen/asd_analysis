@@ -269,3 +269,18 @@ lapply(c(21,1, 9, 6, 13), function(cl){
    ggtitle(paste0("Doublets with contribution from cluster ", cl)) + theme(legend.position = "none")
 })
  ))
+
+
+
+# synthetic doublets have synthetic doublets in their neighborhood
+a <- FNN::get.knn(rbind(pca$x, doublet_pcs), k = 50)
+data.frame(perc_dbl = rowMeans( a$nn.index > nrow(pca$x) ), is_synth = 1:nrow(a$nn.index) > nrow(pca$x)) %>%
+  ggplot() + geom_histogram(aes(perc_dbl, fill = is_synth), alpha=.3) + coord_cartesian(ylim = c(0, 14000))+
+  facet_wrap(~is_synth)
+
+
+plot(rowMeans( a$nn.index > nrow(pca$x) ), pch=20, cex=.4); abline(h = nrow(pca$x))
+
+
+
+
