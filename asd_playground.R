@@ -284,3 +284,22 @@ plot(rowMeans( a$nn.index > nrow(pca$x) ), pch=20, cex=.4); abline(h = nrow(pca$
 
 
 
+
+
+
+
+
+
+# DESeq -------------------------------------------------------------------
+
+
+sel <- tmp_clusters==6  & dblts_perc == 0
+data.frame(ump2[1:nrow(pca$x),],
+           sel
+           ) %>% ggplot(aes(X1, X2, col = sel))+geom_point()+coord_fixed()
+
+
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+library(DESeq2)
+
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks))
