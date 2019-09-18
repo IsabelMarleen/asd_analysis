@@ -247,3 +247,25 @@ plot_grid(p_c+ggtitle("Louvain Clusters used to generate synth. doublets"),
 
 
 
+# Cluster contributions to doublets ---------------------------------------
+
+gg <- ggplot_build(p_c)
+cl_cols <- unique(gg$data[[2]][c("label","colour")])
+
+plot_grid(plotlist = c(list(p_c),
+lapply(c(21,1, 9, 6, 13), function(cl){
+  ggplot()+coord_fixed()+
+  geom_point(data=data.frame(ump2[1:nrow(pca$x),]), aes(X1, X2), col="grey", size=.05)+
+  geom_point(data = data.frame(ump2[is_synth,],
+                               cl_contributed = tmp_clusters[cellsA] == cl | tmp_clusters[cellsB] == cl),
+             aes(X1, X2, col = cl_contributed), size=.05) +
+   scale_color_manual(values = c(`FALSE`="grey", `TRUE`=cl_cols[cl_cols$label==cl,"colour"])) +
+    
+    geom_label(data = labels_df2[labels_df2$cluster == cl,],
+               aes(X1, X2, label = cluster, fill=cluster),
+               fontface = "bold")+ theme(legend.position = "none") +
+   scale_fill_manual(values = cl_cols[cl_cols$label==cl,"colour"]) +
+  
+   ggtitle(paste0("Doublets with contribution from cluster ", cl)) + theme(legend.position = "none")
+})
+ ))
