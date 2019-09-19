@@ -114,19 +114,50 @@ for(i in 1:ncol(nn$nn.index))
 cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirected") )
 
 
+# plot clusters
+df2 <- data.frame(cell = colnames(counts),
+                  umap_euc,
+                  cluster = factor(tmp_clusters),
+                  stringsAsFactors = F) %>%
+  left_join( select(cellinfo, cell, cluster) %>% rename(paper_cluster = cluster), by="cell" )
+labels_louvain2 <- df2 %>% group_by(cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
+labels_paper2 <- df2 %>% group_by(paper_cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
+p_louv <- ggplot() + 
+  geom_point(data=df2,
+             aes(X1, X2, col = cluster),
+             size = .05) + coord_fixed()+
+  geom_label(data = labels_louvain2,
+             aes(X1, X2, col = cluster, label = cluster),
+             fontface = "bold")+ theme(legend.position = "none")
+p_papcl <- ggplot() + 
+  geom_point(data=df2,
+             aes(X1, X2, col = paper_cluster),
+             size = .05) + coord_fixed()+
+  geom_label(data = labels_paper2,
+             aes(X1, X2, col = paper_cluster, label = paper_cluster),
+             fontface = "bold")+ theme(legend.position = "none")
+p_louv # clusters from louvain
+p_papcl # clusters from paper
 
 
+
+
+
+# clean out doublets and ambiguous cells ----------------------------------
+
+tmp_clusters <- cl_louvain$membership
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 20, 23, 19, 17) ~ 5, TRUE ~ tmp_clusters)
+
+# cells that have NN from different cluster:
+nn_inothercluster <- apply(matrix(tmp_clusters[ t(nn) ], ncol = nrow(nn)),
+      2,
+      function(col) length(unique(col)[!is.na(unique(col))]))
 
 
 
 # in silico doublets: randomly draw cells from different clusters and pool their UMIs to form a "synthetic" doublet:
-cellsA <- sample(1:ncol(counts), 5000)
-cellsB <- sample(1:ncol(counts), 5000)
-
 cellsA <- c()
 cellsB <- c()
-tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 20, 23, 19, 17) ~ 5, TRUE ~ tmp_clusters)
 for(i in 1:10000){
   id1 <- sample(1:ncol(counts), 1)
   id2 <- sample( which(  
@@ -161,6 +192,12 @@ nn <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn)
 nn_dists <- sapply( 1:ncol(nn), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn[,j], ] )^2 ) ) )
 
 
+
+# percentage of synthetic doublets doublets in neighborhood for each cell:
+dblts_perc <- rowMeans( nn > nrow(pca$x) )[ 1:nrow(pca$x) ]
+
+
+
 # Run UMAP  with Annoy's output
 ump2 <- uwot::umap( NULL, nn_method = list( idx=nn, dist=nn_dists), 
                     n_threads=40, spread = 15, verbose=TRUE )
@@ -188,7 +225,6 @@ p_umi <- ggplot()+coord_fixed()+geom_point(data=tmp_df, aes(X1, X2, col = log10(
   geom_label(data = tmp_ldf, aes(X1, X2, label = cellinfo.cluster)) + ggtitle("Neurons have high transcription")
 p_umi
 
-dblts_perc <- rowMeans( nn > nrow(pca$x) )[ 1:nrow(pca$x) ]
 p_dbl <- ggplot() + coord_fixed()+
   geom_point(data = data.frame(ump2[1:nrow(pca$x),]),
              aes(X1, X2),
@@ -201,22 +237,12 @@ p_dbl
 
 
 
-# plot clusters
-df2 <- data.frame(ump2[1:nrow(pca$x),], cluster = factor(tmp_clusters))
-labels_df2 <- df2 %>% group_by(cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
-p_c <- ggplot() + 
-  geom_point(data=df2,
-             aes(X1, X2, col = cluster),
-             size = .05) + coord_fixed()+
-  geom_label(data = labels_df2,
-             aes(X1, X2, col = cluster, label = cluster),
-             fontface = "bold")+ theme(legend.position = "none")
-p_c
 
 
 
 
-plot_grid(p_c, p_synth, p_dbl, p_umi, ncol=2)
+
+plot_grid(p_louv, p_synth, p_dbl, p_umi, ncol=2)
 
 
 
@@ -292,15 +318,58 @@ plot(rowMeans( a$nn.index > nrow(pca$x) ), pch=20, cex=.4); abline(h = nrow(pca$
 
 
 # DESeq -------------------------------------------------------------------
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+  mutate(individual = factor(individual),
+         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+         region    = factor(region))
+rownames(coldat) <- coldat$sample
 
 
-sel <- tmp_clusters==6  & dblts_perc == 0
-data.frame(ump2[1:nrow(pca$x),],
+
+
+
+
+
+
+
+sel <- tmp_clusters==5  #& dblts_perc == 0  & nn_inothercluster[1:length(tmp_clusters)] <= 1
+data.frame(umap_euc,
            sel
-           ) %>% ggplot(aes(X1, X2, col = sel))+geom_point()+coord_fixed()
+           ) %>% ggplot(aes(X1, X2, col = sel))+geom_point(size=.1)+coord_fixed()
 
 
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 library(DESeq2)
 
-coldat <- filter(sampleTable, sample %in% colnames(pseudobulks))
+
+
+dds <- DESeqDataSetFromMatrix( pseudobulks,
+                               coldat[colnames(pseudobulks), ],
+                               design = ~ sex + region + diagnosis )
+dds_32364 <- DESeq(dds)
+resultsNames(dds)
+table( results(dds, name = "diagnosis_ASD_vs_Control")$padj < .1 )
+
+
+
+
+plot(
+  -log10(results(dds_32364, name = "diagnosis_ASD_vs_Control")$padj),
+  -log10(results(dds_23409, name = "diagnosis_ASD_vs_Control")$padj),
+  pch=20, cex=.5, asp=1);abline(v=1, h=1, lty=2); abline(0,1)
+
+# It looks like we are gaining a lot of power by removing ambiguous cells!
+
+
+
+# I can't use the patient / the individual here for this reason:
+mat <- data.frame(ind = factor(c(1,1,2,2, 3,3, 4,4)),
+                  reg = factor(rep(1:2, times=4)),
+           dgn = factor(rep(c("A","B"), each=4)))
+rankMatrix(model.matrix(~ reg:dgn, mat) )
+
+
+
+
+
+
