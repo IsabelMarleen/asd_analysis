@@ -332,23 +332,68 @@ rownames(coldat) <- coldat$sample
 
 
 
-sel <- tmp_clusters==5  #& dblts_perc == 0  & nn_inothercluster[1:length(tmp_clusters)] <= 1
-data.frame(umap_euc,
-           sel
-           ) %>% ggplot(aes(X1, X2, col = sel))+geom_point(size=.1)+coord_fixed()
+sel <- tmp_clusters==5  & dblts_perc == 0  & nn_inothercluster[1:length(tmp_clusters)] <= 1
+
 
 
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 library(DESeq2)
-
+library(BiocParallel)
 
 
 dds <- DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
                                design = ~ sex + region + diagnosis )
-dds_32364 <- DESeq(dds)
+dds_ltr <- DESeq(dds, test="LRT",
+             reduced=~ sex + region + diagnosis,
+             parallel=TRUE, BPPARAM=MulticoreParam(20))
+table(results(dds_ltr)$padj < .1) # if this gives 0 genes, we do not have to include interactions
+
+dds <- DESeq(dds, 
+             parallel=TRUE, BPPARAM=MulticoreParam(20))
 resultsNames(dds)
-table( results(dds, name = "diagnosis_ASD_vs_Control")$padj < .1 )
+results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
+  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% head
+
+plotCounts(dds, "TTTY10", intgroup = c("sex", "region", "diagnosis"))
+g <- "GADD45G"
+data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs, sel) %>%
+   filter(sel) %>%
+  ggplot(aes(X1, X2, col = Gene / sfs / mean(1/sfs))) + geom_point(size=.1)+coord_fixed()+
+  col_pwr_trans(1/2, g) + facet_wrap(~ region + diagnosis)
+
+
+
+
+
+degs <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
+  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% pull(Gene)
+
+
+deg_pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[degs, sel])),
+                            n = 20,
+                            scale. = TRUE)
+deg_umap  <- uwot::umap( deg_pca$x, n_neighbors=30, spread = 5, n_threads = 40, verbose = TRUE)
+
+g <- "WNT7B"
+data.frame(deg_umap, cellinfo[sel, ], Gene = Tcounts[sel, g], sfs=sfs[sel]) %>%
+  ggplot(aes(X1, X2, col = diagnosis))+geom_point(size=1) + coord_fixed()
+  ggplot(aes(X1, X2, col = Gene/sfs/mean(1/sfs)))+geom_point(size=1) + coord_fixed()+
+    col_pwr_trans(1/2, g)
+
+
+
+
+
+
+
+
+
+data.frame(umap_euc,
+           sel
+           ) %>% ggplot(aes(X1, X2, col = sel))+geom_point(size=.1)+coord_fixed()
+
+model.matrix(~ sex + region + diagnosis, data = coldat[colnames(pseudobulks), ])
 
 
 
@@ -362,11 +407,11 @@ plot(
 
 
 
-# I can't use the patient / the individual here for this reason:
-mat <- data.frame(ind = factor(c(1,1,2,2, 3,3, 4,4)),
-                  reg = factor(rep(1:2, times=4)),
-           dgn = factor(rep(c("A","B"), each=4)))
-rankMatrix(model.matrix(~ reg:dgn, mat) )
+
+
+
+
+
 
 
 
