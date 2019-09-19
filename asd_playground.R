@@ -17,7 +17,11 @@ source(file.path(scr_dir, "functions_universal.R"))
 path <- "/home/frauhammer/sds_copy/ASD/"
 cellinfo <- read.delim( file.path( path, "meta.txt" ), stringsAsFactors=FALSE )
 counts <- readMM( file.path( path, "matrix.mtx" ) )
-rownames(counts) <- read.delim( file.path( path, "genes.tsv" ), header=FALSE )$V2
+gene_info <- read.delim( file.path( path, "genes.tsv" ), header=FALSE, as.is=TRUE ) %>%
+  mutate(unique = case_when(
+  duplicated(gene_info$V2) | duplicated(gene_info$V2, fromLast=T) ~ paste(V2, V1, sep="_"),
+  TRUE ~ V2))
+rownames(counts) <- gene_info$unique
 colnames(counts) <- readLines( file.path( path, "barcodes.tsv" ) )
 
 
@@ -28,16 +32,13 @@ sampleTable
 # extracting gene expression is much faster in column-sparse format:
 Tcounts <- as(t(counts), "dgCMatrix")   #  fast:   Tcounts[, "SYN1"]
 
-Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]
-
-
-
+Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]   and  colSums(Ccounts)
 
 
 
 # find informative genes    (rsession goes up to 25 GB RAM [htop])
 sfs <- colSums(counts)
-norm_counts <- t(t(counts) / colSums(counts))
+norm_counts <- t(t(Ccounts) / colSums(Ccounts))
 poisson_vmr <- mean(1/sfs)
 gene_means <- rowMeans( norm_counts )
 gene_vars <- rowVars_spm( norm_counts )
@@ -53,9 +54,9 @@ points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch="
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
-umap_euc <- uwot::umap( pca$x, spread = 2, n_threads = 40)
+umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40)
 
-umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 2, n_threads = 40)
+umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 10, n_threads = 40)
 
 
 
