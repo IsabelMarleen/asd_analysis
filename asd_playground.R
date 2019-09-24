@@ -90,7 +90,11 @@ for(i in 1:ncol(nn_cells$nn.index))
 cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirected") )
 
 tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 20, 23, 19, 17) ~ 5, TRUE ~ tmp_clusters)
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 22, 19, 17) ~ 5, TRUE ~ tmp_clusters)
+
+
+data.frame(umap_euc, cl = factor(tmp_clusters)) %>%
+  ggplot()+geom_point(aes(X1, X2, col=cl), size=.1)
 
 
 
@@ -100,7 +104,7 @@ df2 <- data.frame(cell = colnames(counts),
                   umap_euc,
                   cluster = factor(tmp_clusters),
                   stringsAsFactors = F) %>%
-  left_join( select(cellinfo, cell, cluster) %>% rename(paper_cluster = cluster), by="cell" )
+  left_join( select(cellinfo, cell, cluster) %>% dplyr::rename(paper_cluster = cluster), by="cell" )
 labels_louvain2 <- df2 %>% group_by(cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
 labels_paper2 <- df2 %>% group_by(paper_cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
 p_louv <- ggplot() + 
@@ -170,7 +174,7 @@ for( i in 1:nrow(featureMatrix) )
 annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
 nn <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
 nn_dists <- sapply( 1:ncol(nn), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn[,j], ] )^2 ) ) )
-
+rm(featureMatrix, annoy)
 
 
 # percentage of synthetic doublets doublets in neighborhood for each cell:
@@ -249,6 +253,7 @@ pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel
 
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
+         age = factor(age),
          diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
          region    = factor(region))
 rownames(coldat) <- coldat$sample
@@ -260,7 +265,7 @@ library(BiocParallel)
 
 dds <- DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
-                               design = ~  diagnosis )
+                               design = ~ sex + age + diagnosis )
 # I tested that we do not need interactions between sex, region and diagnosis with
 # DESeq's LTR.
 dds <- DESeq(dds, 
@@ -271,8 +276,8 @@ results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames
 
 
 plot(
-  -log10(results(dds_32364, name = "diagnosis_ASD_vs_Control")$padj),
-  -log10(results(dds_23409, name = "diagnosis_ASD_vs_Control")$padj),
+  -log10(results(dds_32k, name = "diagnosis_ASD_vs_Control")$padj),
+  -log10(results(dds_23k, name = "diagnosis_ASD_vs_Control")$padj),
   pch=20, cex=.5, asp=1);abline(v=1, h=1, lty=2); abline(0,1)
 
 # It looks like we are gaining a lot of power by removing ambiguous cells!
