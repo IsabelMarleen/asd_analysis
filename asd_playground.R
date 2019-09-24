@@ -272,7 +272,7 @@ dds <- DESeq(dds,
              parallel=TRUE, BPPARAM=MulticoreParam(20))
 resultsNames(dds)
 results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
-  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% dim
+  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% head(n=20)
 
 
 plot(
@@ -286,51 +286,12 @@ plot(
 
 
 
-plotCounts(dds, "TTTY10", intgroup = c("sex", "region", "diagnosis"))
-g <- "GADD45G"
+g <- "RGS4"
+plotCounts(dds, g, intgroup = c("sex", "region", "diagnosis"))
 data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs, sel) %>%
    filter(sel) %>%
   ggplot(aes(X1, X2, col = Gene / sfs / mean(1/sfs))) + geom_point(size=.1)+coord_fixed()+
   col_pwr_trans(1/2, g) + facet_wrap(~ region + diagnosis)
-
-
-
-
-
-degs <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
-  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% pull(Gene)
-
-
-deg_pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[degs, sel])),
-                            n = 20,
-                            scale. = TRUE)
-deg_umap  <- uwot::umap( deg_pca$x, n_neighbors=30, spread = 5, n_threads = 40, verbose = TRUE)
-
-g <- "WNT7B"
-data.frame(deg_umap, cellinfo[sel, ], Gene = Tcounts[sel, g], sfs=sfs[sel]) %>%
-  ggplot(aes(X1, X2, col = diagnosis))+geom_point(size=1) + coord_fixed()
-  ggplot(aes(X1, X2, col = Gene/sfs/mean(1/sfs)))+geom_point(size=1) + coord_fixed()+
-    col_pwr_trans(1/2, g)
-
-
-
-
-
-
-
-
-
-data.frame(umap_euc,
-           sel
-           ) %>% ggplot(aes(X1, X2, col = sel))+geom_point(size=.1)+coord_fixed()
-
-model.matrix(~ sex + region + diagnosis, data = coldat[colnames(pseudobulks), ])
-
-
-
-
-
-
 
 
 
