@@ -60,30 +60,6 @@ umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 10, n_threads = 40)
 
 
 
-# Clusters from paper -----------------------------------------------------
-
-df <- data.frame(cell = colnames(norm_counts), umap_euc, stringsAsFactors = F) %>%
-  left_join(cellinfo, by = "cell") %>%
-  mutate(individual = factor(individual))
-# some clusters from the paper are mixing in UMAP, i.e. are not robust to preprocessing, so we merge them:
-df <- df %>% mutate(cluster = case_when(
-  grepl("^Neu-NRGN-", cluster) ~ "Neu_NRGN",
-  grepl("^AST-", cluster) ~ "AST",
-  TRUE ~ cluster
-))
-
-labels_df <- df %>% group_by(cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
-
-p_cl <-   ggplot() + 
-  geom_point(data=df,
-             aes(X1, X2, col = cluster),
-             size = .05) + coord_fixed()+
-  geom_label(data = labels_df,
-             aes(X1, X2, col = cluster, label = cluster),
-             fontface = "bold")+ theme(legend.position = "none")
-p_cl
-
-
 
 
 
