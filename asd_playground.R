@@ -19,7 +19,7 @@ cellinfo <- read.delim( file.path( path, "meta.txt" ), stringsAsFactors=FALSE )
 counts <- readMM( file.path( path, "matrix.mtx" ) )
 gene_info <- read.delim( file.path( path, "genes.tsv" ), header=FALSE, as.is=TRUE ) %>%
   mutate(unique = case_when(
-  duplicated(gene_info$V2) | duplicated(gene_info$V2, fromLast=T) ~ paste(V2, V1, sep="_"),
+  duplicated(V2) | duplicated(V2, fromLast=T) ~ paste(V2, V1, sep="_"),
   TRUE ~ V2))
 rownames(counts) <- gene_info$unique
 colnames(counts) <- readLines( file.path( path, "barcodes.tsv" ) )
@@ -81,13 +81,18 @@ ggplot()+
 
 
 # Louvain clusters
-nn <- FNN::get.knn( pca$x, k = 50)
+nn_cells <- FNN::get.knn( pca$x, k = 50)
 adj <- Matrix(0, nrow = nrow(pca$x), ncol = nrow(pca$x)) # has to be sparse, otherwise takes 80 GB of RAM
-for(i in 1:ncol(nn$nn.index))
-  adj[ cbind(1:nrow(pca$x), nn$nn.index[, i]) ] <- 1
-for(i in 1:ncol(nn$nn.index))
-  adj[ cbind(nn$nn.index[, i], 1:nrow(pca$x)) ] <- 1
+for(i in 1:ncol(nn_cells$nn.index))
+  adj[ cbind(1:nrow(pca$x), nn_cells$nn.index[, i]) ] <- 1
+for(i in 1:ncol(nn_cells$nn.index))
+  adj[ cbind(nn_cells$nn.index[, i], 1:nrow(pca$x)) ] <- 1
 cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirected") )
+
+tmp_clusters <- cl_louvain$membership
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 20, 23, 19, 17) ~ 5, TRUE ~ tmp_clusters)
+
+
 
 
 # plot clusters
@@ -121,15 +126,14 @@ p_papcl # clusters from paper
 
 # clean out doublets and ambiguous cells ----------------------------------
 
-tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 20, 23, 19, 17) ~ 5, TRUE ~ tmp_clusters)
 
-# cells that have NN from different cluster:
-nn_inothercluster <- apply(matrix(tmp_clusters[ t(nn) ], ncol = nrow(nn)),
-      2,
-      function(col) length(unique(col)[!is.na(unique(col))]))
-
-
+# number of NN from different cluster:
+nn_inothercluster <- colSums(
+  matrix(tmp_clusters[ t(nn_cells$nn.index) ],
+         ncol = nrow(nn_cells$nn.index))   != 
+  matrix(rep(tmp_clusters, each = ncol(nn_cells$nn.index)),
+         ncol = nrow(nn_cells$nn.index)) )
+ 
 
 # in silico doublets: randomly draw cells from different clusters and pool their UMIs to form a "synthetic" doublet:
 cellsA <- c()
@@ -180,82 +184,23 @@ ump2 <- uwot::umap( NULL, nn_method = list( idx=nn, dist=nn_dists),
 
 
 
-# plots
-p_g1 <- data.frame(ump2[1:nrow(pca$x),], Gene = Tcounts[, "SYT1"]/sfs/mean(1/sfs)) %>% 
-  ggplot(aes(X1, X2, col = Gene))+geom_point(size=.05)+coord_fixed()+col_pwr_trans(1/2, "Gene")
-
-p_synth <- ggplot() + coord_fixed()+
-  geom_point(data = data.frame(ump2[1:nrow(pca$x),]),
-             aes(X1, X2),
-             size = .05, col = "grey")+
-  geom_point(data = data.frame(ump2[(nrow(pca$x)+1):nrow(ump2),]),
-             aes(X1, X2),
-             size = .05, col = "red") + ggtitle("10000 artificial doublets")
-
-
-
-tmp_df <- data.frame(ump2[1:nrow(pca$x), ], sfs, cellinfo$cluster) 
-tmp_ldf <- tmp_df %>% group_by(cellinfo.cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
-p_umi <- ggplot()+coord_fixed()+geom_point(data=tmp_df, aes(X1, X2, col = log10(sfs)), size=.05)+
-  scale_color_gradientn(name = "log10_nUMI", colours = rev(rje::cubeHelix(100))[5:100])+
-  geom_label(data = tmp_ldf, aes(X1, X2, label = cellinfo.cluster)) + ggtitle("Neurons have high transcription")
-p_umi
-
-p_dbl <- ggplot() + coord_fixed()+
-  geom_point(data = data.frame(ump2[1:nrow(pca$x),]),
-             aes(X1, X2),
-             size = .05, col = "grey")+
-  geom_point(data = data.frame(ump2[1:nrow(pca$x),][dblts_perc > .05,]),
-             aes(X1, X2),
-             size = .05, col = "black")+
-  ggtitle("Cells with synth. doublets as NN")
-p_dbl
-
-
-
-
-
-
-
-
-plot_grid(p_louv, p_synth, p_dbl, p_umi, ncol=2)
-
-
-
-
-
-
-
-
-
 is_synth <- 1:nrow(ump2) > nrow(pca$x)
 
-p_5 <- ggplot()+coord_fixed()+
-  geom_point(data=data.frame(ump2[1:nrow(pca$x),]), aes(X1, X2), col="grey", size=.05)+
-  geom_point(data = data.frame(ump2[is_synth,],
-                               has_5 = tmp_clusters[cellsA] == 5 | tmp_clusters[cellsB] == 5),
-             aes(X1, X2, col = has_5), size=.05)+ggtitle("Synthetic doublets with cell from cl5")
 
-p_large <- ggplot()+coord_fixed()+
-  geom_point(data=data.frame(ump2[1:nrow(pca$x),]), aes(X1, X2), col="grey", size=.05)+
-  geom_point(data = data.frame(ump2[is_synth,],
-                               has_large = sfs[cellsA] > 10^3.65 | sfs[cellsB] > 10^3.65),
-             aes(X1, X2, col = has_large), size=.05) + ggtitle("Synthetic doublets containing large cells")
 
-plot_grid(p_c+ggtitle("Louvain Clusters used to generate synth. doublets"),
-          p_umi,
-          p_large,
-          ncol=3)
 
+
+
+  
 
 
 
 # Cluster contributions to doublets ---------------------------------------
 
-gg <- ggplot_build(p_c)
+gg <- ggplot_build(p_louv)
 cl_cols <- unique(gg$data[[2]][c("label","colour")])
 
-plot_grid(plotlist = c(list(p_c),
+plot_grid(plotlist = c(list(p_louv),
 lapply(c(21,1, 9, 6, 13), function(cl){
   ggplot()+coord_fixed()+
   geom_point(data=data.frame(ump2[1:nrow(pca$x),]), aes(X1, X2), col="grey", size=.05)+
@@ -294,6 +239,14 @@ plot(rowMeans( a$nn.index > nrow(pca$x) ), pch=20, cex=.4); abline(h = nrow(pca$
 
 
 # DESeq -------------------------------------------------------------------
+
+# cells for which to compare ASD vs control:
+sel <- tmp_clusters==5  & dblts_perc == 0  & nn_inothercluster <= 1
+
+
+
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
          diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
@@ -301,35 +254,32 @@ coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>%
 rownames(coldat) <- coldat$sample
 
 
-
-
-
-
-
-
-
-sel <- tmp_clusters==5  & dblts_perc == 0  & nn_inothercluster[1:length(tmp_clusters)] <= 1
-
-
-
-pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 library(DESeq2)
 library(BiocParallel)
 
 
 dds <- DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
-                               design = ~ sex + region + diagnosis )
-dds_ltr <- DESeq(dds, test="LRT",
-             reduced=~ sex + region + diagnosis,
-             parallel=TRUE, BPPARAM=MulticoreParam(20))
-table(results(dds_ltr)$padj < .1) # if this gives 0 genes, we do not have to include interactions
-
+                               design = ~  diagnosis )
+# I tested that we do not need interactions between sex, region and diagnosis with
+# DESeq's LTR.
 dds <- DESeq(dds, 
              parallel=TRUE, BPPARAM=MulticoreParam(20))
 resultsNames(dds)
 results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
-  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% head
+  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% dim
+
+
+plot(
+  -log10(results(dds_32364, name = "diagnosis_ASD_vs_Control")$padj),
+  -log10(results(dds_23409, name = "diagnosis_ASD_vs_Control")$padj),
+  pch=20, cex=.5, asp=1);abline(v=1, h=1, lty=2); abline(0,1)
+
+# It looks like we are gaining a lot of power by removing ambiguous cells!
+
+
+
+
 
 plotCounts(dds, "TTTY10", intgroup = c("sex", "region", "diagnosis"))
 g <- "GADD45G"
@@ -374,12 +324,6 @@ model.matrix(~ sex + region + diagnosis, data = coldat[colnames(pseudobulks), ])
 
 
 
-plot(
-  -log10(results(dds_32364, name = "diagnosis_ASD_vs_Control")$padj),
-  -log10(results(dds_23409, name = "diagnosis_ASD_vs_Control")$padj),
-  pch=20, cex=.5, asp=1);abline(v=1, h=1, lty=2); abline(0,1)
-
-# It looks like we are gaining a lot of power by removing ambiguous cells!
 
 
 
