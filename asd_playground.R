@@ -39,6 +39,7 @@ Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]   and  colSum
 # find informative genes    (rsession goes up to 25 GB RAM [htop])
 sfs <- colSums(counts)
 norm_counts <- t(t(Ccounts) / colSums(Ccounts))
+rownames(norm_counts) <- rownames(Ccounts)
 poisson_vmr <- mean(1/sfs)
 gene_means <- rowMeans( norm_counts )
 gene_vars <- rowVars_spm( norm_counts )
@@ -243,14 +244,18 @@ plot(rowMeans( a$nn.index > nrow(pca$x) ), pch=20, cex=.4); abline(h = nrow(pca$
 
 
 # DESeq -------------------------------------------------------------------
+library(DESeq2)
+library(BiocParallel)
 
-# cells for which to compare ASD vs control:
+# visualize dirty cells we clean away:
+tmp <- data.frame(umap_euc, clean = dblts_perc == 0  & nn_inothercluster <= 1)
+ggplot() + geom_point(data=filter(tmp, clean), aes(X1, X2), col = "grey", size=.1) + geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1)
+
+
+
+# compare ASD vs control for one cluster:
 sel <- tmp_clusters==5  & dblts_perc == 0  & nn_inothercluster <= 1
-
-
-
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
-
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
          age = factor(age),
@@ -258,34 +263,18 @@ coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>%
          region    = factor(region))
 rownames(coldat) <- coldat$sample
 
-
-library(DESeq2)
-library(BiocParallel)
-
-
 dds <- DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
                                design = ~ sex + age + diagnosis )
-# I tested that we do not need interactions between sex, region and diagnosis with
-# DESeq's LTR.
+# For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
+# DESeq's LTR for this (see mail to Simon at mid-September 2019).
 dds <- DESeq(dds, 
              parallel=TRUE, BPPARAM=MulticoreParam(20))
-resultsNames(dds)
-results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
-  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% head(n=20)
-
-
-plot(
-  -log10(results(dds_32k, name = "diagnosis_ASD_vs_Control")$padj),
-  -log10(results(dds_23k, name = "diagnosis_ASD_vs_Control")$padj),
-  pch=20, cex=.5, asp=1);abline(v=1, h=1, lty=2); abline(0,1)
-
-# It looks like we are gaining a lot of power by removing ambiguous cells!
 
 
 
 
-
+# Plot individual genes
 g <- "RGS4"
 plotCounts(dds, g, intgroup = c("sex", "region", "diagnosis"))
 data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs, sel) %>%
@@ -297,10 +286,40 @@ data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs, sel) %>%
 
 
 
+# Compare to sfari database
+
+sfari <- read_csv(file.path("~", "asd_analysis",
+                            "SFARI-Gene_genes_08-29-2019release_09-24-2019export.csv")) %>%
+  rename_all(make.names)
+in_database <- sfari$gene.symbol[ sfari$gene.symbol %in% gene_info$V2 ]
+
+dds <- dds_32k
+degs <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
+  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% pull(Gene)
+in_test     <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>%
+                   rownames_to_column("Gene") %>% filter(!is.na(padj)) %>% pull(Gene) 
+
+for_fisher <- matrix(table( in_test %in% degs, in_test %in% in_database), ncol=2,
+       dimnames = list(is_deg = c("no","yes"), in_database = c("no","yes")))
+
+fisher.test(for_fisher)
 
 
 
 
+# Investigate gene-gene correlations (maybe useful to see if subpopulations of cells exist or not):
+deg_cors <- cor(  as.matrix( t(sqrt(norm_counts[degs, sel])) ) )
+hist(deg_cors, 100)
+# adjacency matrix: 
+deg_adj <- 0 + (deg_cors > .2)
 
+neighborless <- rowSums( deg_cors > .2 ) <= 1
+deg_cl <- cluster_louvain( graph_from_adjacency_matrix(deg_adj[!neighborless, !neighborless], mode = "undirected") )
+
+deg_umap <- uwot::umap( 1-deg_cors[!neighborless, !neighborless], spread = 10, n_threads = 10)
+data.frame(deg_umap, cl = factor(deg_cl$membership)) %>% ggplot(aes(X1, X2, col=cl))+geom_point()
+
+
+groups(deg_cl)$`1`  # investigate further?
 
 
