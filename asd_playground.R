@@ -150,34 +150,43 @@ ggplot()+
 
 # Doublets and ambiguous cells ----------------------------------
 
+# load (or re-execute everything in this section):
+load(file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
+
+
+
+
+
+
 
 # number of NN from different cluster:
 nn_inothercluster <- colSums(
-  matrix(tmp_clusters[ t(nn_cells$nn.index) ],
-         ncol = nrow(nn_cells$nn.index))   != 
-  matrix(rep(tmp_clusters, each = ncol(nn_cells$nn.index)),
-         ncol = nrow(nn_cells$nn.index)) )
+  matrix(tmp_clusters[ t(nn_cells) ],
+         ncol = nrow(nn_cells))   != 
+  matrix(rep(tmp_clusters, each = ncol(nn_cells)),
+         ncol = nrow(nn_cells)) )
  
 
 # in silico doublets: randomly draw cells from different clusters and pool their UMIs to form a "synthetic" doublet:
-cellsA <- c()
-cellsB <- c()
-for(i in 1:10000){
-  id1 <- sample(1:ncol(counts), 1)
-  id2 <- sample( which(  
-    # sample amongst cells from same sample and different cluster:
-    cellinfo$sample == cellinfo$sample[id1]  &  tmp_clusters != tmp_clusters[id1]
-    ),1)
-  cellsA <<- c(cellsA, id1)
-  cellsB <<- c(cellsB, id2)
+
+cellsA <- sample(1:ncol(counts), 50000)
+cellsB <- rep(NA, 50000)
+smpA <- cellinfo$sample[cellsA]
+clA  <- tmp_clusters[cellsA]
+tmp <- data.frame(smpA, clA) %>% group_by(smpA, clA) %>% tally
+for(i in 1:nrow(tmp)) {
+  is_smp <- cellinfo$sample[cellsA] == tmp$smpA[i]  
+  is_cl  <- tmp_clusters[cellsA] == tmp$clA[i]
+  # sample amongst cells from same sample and different cluster:
+  cellsB[ is_smp & is_cl ] <- base::sample(
+    x = which(cellinfo$sample == tmp$smpA[i]   & !tmp_clusters == tmp$clA[i]),
+    size = tmp$n[i],
+    replace = T) # in case one cluster is larger than all others combined
 }
-
-
 
 doublet_raw <- Ccounts[, cellsA] + Ccounts[, cellsB]
 doublet_pcs <- predict(pca,
                        newdata = sqrt( (t(doublet_raw) / colSums(doublet_raw))[, is_informative] ))
-
 
 
 # Alternative 1 (clearer):
@@ -192,21 +201,19 @@ annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
 for( i in 1:nrow(featureMatrix) ) 
   annoy$addItem( i-1, featureMatrix[i,] )
 annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
-nn <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
-nn_dists <- sapply( 1:ncol(nn), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn[,j], ] )^2 ) ) )
+nn_doublets <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
+nndists_doublets <- sapply( 1:ncol(nn_doublets), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn_doublets[,j], ] )^2 ) ) )
 rm(featureMatrix, annoy)
 
 
-# percentage of synthetic doublets doublets in neighborhood for each cell:
+# percentage of synthetic doublets in neighborhood for each cell:
 dblts_perc <- rowMeans( nn_doublets > nrow(pca$x) )[ 1:nrow(pca$x) ]
 
 
 
-# Run UMAP  with Annoy's output
+# Run UMAP with Annoy's output
 ump2 <- uwot::umap( NULL, nn_method = list( idx=nn_doublets, dist=nndists_doublets), 
                     n_threads=40, spread = 15, verbose=TRUE )
-
-
 
 is_synth <- 1:nrow(ump2) > nrow(pca$x)
 
@@ -215,20 +222,11 @@ is_synth <- 1:nrow(ump2) > nrow(pca$x)
 
 
 
-
-
-
-  # savepoint ---------------------------------------------------------------
 # save(list = c("nn_doublets", "nndists_doublets", "cellsA", "cellsB",
 #                 "dblts_perc", "is_synth", "ump2"),
 #      file = file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
-# 
-# save(list = c("cl_louvain", "tmp_clusters", "nn_cells", "nn_inothercluster"),
-#      file = file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
 
-# read in data and do preprocessing, then read in this and you're good to go:
-load(file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
-load(file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
+
 
 
 
