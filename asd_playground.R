@@ -1,6 +1,13 @@
 # This script crashes with 16 GB or less of RAM.
 # Rsession will use 30 GB or RAM in the long-run, not sure about peaks.
 
+
+
+
+
+# Load --------------------------------------------------------------------
+
+
 library( tidyverse )
 library( Matrix )
 library( irlba )
@@ -42,7 +49,7 @@ Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]   and  colSum
 
 # Preprocessing -----------------------------------------------------------
 
-# you need umap_euc, sfs and norm_counts:
+# load (or re-execute everything in this section):
 sfs <- colSums(counts)
 norm_counts <- t(t(Ccounts) / colSums(Ccounts))
 rownames(norm_counts) <- rownames(Ccounts)
@@ -51,7 +58,7 @@ load(file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
 
 
 
-# other computations:
+# informative genes, PCA, UMAP:
 poisson_vmr <- mean(1/sfs)
 gene_means <- rowMeans( norm_counts )
 gene_vars <- rowVars_spm( norm_counts )
@@ -59,16 +66,14 @@ cells_expressing <- rowSums( counts != 0 )
 is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  cells_expressing > 100
 plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
 points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
-
-# PCA and UMAP   (goes up to 18 GB of RAM)
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
 umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40)
 umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 10, n_threads = 40)
 
-save(umap_euc,
-     file = file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
+# save(umap_euc,
+#      file = file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
 
 
 
@@ -78,38 +83,48 @@ save(umap_euc,
 # Clusters ---------------------------------------------------
 
 
-g <- "SYT1"    # Neuron marker
-g <- "SLC1A2"  # Astrocyte marker
-
-ggplot()+
-  geom_point(data = data.frame(umap_euc, Gene = Tcounts[, g], sfs = sfs),
-             aes(X1, X2, col = Gene / sfs / mean(1/sfs)), size=.1) +
-  coord_fixed() + col_pwr_trans(1/2, g) +
-  geom_label(data = labels_df,
-             aes(X1, X2, label = cluster),
-             fontface = "bold")
+# load (or re-execute everything in this section):
+load(file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
 
 
 
 
-# Louvain clusters
-nn_cells <- FNN::get.knn( pca$x, k = 50)
+
+
+# find NN for each cell:
+library( RcppAnnoy )
+featureMatrix <- pca$x; k_nn <- 50
+annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
+for( i in 1:nrow(featureMatrix) ) 
+  annoy$addItem( i-1, featureMatrix[i,] )
+annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
+nn_cells <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
+nndists_cells <- sapply( 1:ncol(nn_cells), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn_cells[,j], ] )^2 ) ) )
+rm(featureMatrix, annoy)
+
+# cluster on nearest neighbor graph (Louvain):
 adj <- Matrix(0, nrow = nrow(pca$x), ncol = nrow(pca$x)) # has to be sparse, otherwise takes 80 GB of RAM
-for(i in 1:ncol(nn_cells$nn.index))
-  adj[ cbind(1:nrow(pca$x), nn_cells$nn.index[, i]) ] <- 1
-for(i in 1:ncol(nn_cells$nn.index))
-  adj[ cbind(nn_cells$nn.index[, i], 1:nrow(pca$x)) ] <- 1
+for(i in 1:ncol(nn_cells))
+  adj[ cbind(1:nrow(pca$x), nn_cells[, i]) ] <- 1
+for(i in 1:ncol(nn_cells))
+  adj[ cbind(nn_cells[, i], 1:nrow(pca$x)) ] <- 1
 cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirected") )
 
+# merge clusters that are separated by patient heterogeneity:
 tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 19, 20, 23) ~ 5, TRUE ~ tmp_clusters)
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 6, 8, 1, 10, 20, 2) ~ 5, TRUE ~ tmp_clusters) # excit. Ns
+tmp_clusters <- case_when(tmp_clusters %in% c(11, 15, 19) ~ 11, TRUE ~ tmp_clusters) # astrocytes
+tmp_clusters <- case_when(tmp_clusters %in% c(3, 9, 18) ~ 3, TRUE ~ tmp_clusters) # OPCs
+
+
+
 
 
 # Louvain clusters 
 p_louv <- ggplot()+
   geom_point(data = data.frame(umap_euc, cl=factor(tmp_clusters)),
              aes(X1, X2, col = cl), size = .1) +
-  geom_label(data = group_by(data.frame(umap_euc, cl=factor(tmp_clusters)), cl) %>% summarise(X1=mean(X1), X2=mean(X2)), 
+  geom_label(data = group_by(data.frame(umap_euc, cl=factor(tmp_clusters)), cl) %>%summarise(X1=mean(X1), X2=mean(X2)), 
              aes(X1, X2, label = cl))
 p_louv
 
@@ -123,6 +138,10 @@ ggplot()+
                summarise(X1=mean(X1), X2=mean(X2)),
              aes(X1, X2, label = cluster))
 
+
+# 
+# save(list = c("cl_louvain", "tmp_clusters", "nn_cells", "nn_inothercluster"),
+#      file = file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
 
 
 
