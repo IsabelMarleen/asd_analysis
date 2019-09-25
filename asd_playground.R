@@ -320,17 +320,58 @@ library(DESeq2)
 library(BiocParallel)
 
 # visualize dirty cells we clean away:
-tmp <- data.frame(umap_euc, clean = dblts_perc == 0  & nn_inothercluster <= 1)
-ggplot() + geom_point(data=filter(tmp, clean), aes(X1, X2), col = "grey", size=.1) + geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1)
+tmp <- data.frame(umap_euc, clean = dblts_perc < 3/50  & nn_inothercluster < 1, cl = factor(tmp_clusters))
+ggplot() + coord_fixed()+
+  geom_point(data=filter(tmp,  clean), aes(X1, X2), col = "grey", size=.1) +
+  geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1) +
+  geom_label(data=group_by(tmp, cl) %>% summarise(X1=mean(X1), X2=mean(X2)), aes(X1, X2, label=cl))
+
+tmp <- as.matrix(table(sample=cellinfo$sample, clean = dblts_perc == 0  & nn_inothercluster < 1))
+data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2])) %>% left_join(sampleTable, by="sample") %>% ggplot(aes(sample, dirtyProportion, col = diagnosis))+geom_point()
 
 
 
-# compare ASD vs control for one cluster:
-sel <- tmp_clusters==5  & dblts_perc == 0  & nn_inothercluster <= 1
+
+
+
+# compare ASD vs control for several clusters:
+res_clean <- lapply(c(10, 13, 6, 1, 21, 17), function(cl){
+  print(cl)
+  sel <- tmp_clusters== cl      & dblts_perc == 0  & nn_inothercluster < 1
+  
+  pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+  coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+    mutate(individual = factor(individual),
+           sex = factor(sex),
+           diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+           region    = factor(region))
+  rownames(coldat) <- coldat$sample
+  dds <- DESeqDataSetFromMatrix( pseudobulks, coldat[colnames(pseudobulks), ],
+                                 design = ~ sex + age + diagnosis )
+  dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(20))
+  res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") 
+  list(cluster = cl, ncells = sum(sel), res = res_df ) 
+})
+
+
+plot_grid(plotlist = lapply(names(res_clean), function(cl){
+ data.frame(padj_clean=res_clean[[cl]]$res$padj,
+           padj_dirty=res_dirty[[cl]]$res$padj) %>% ggplot(aes(-log10(padj_dirty), -log10(padj_clean)))+
+  geom_point()+coord_fixed() + geom_abline() + geom_vline(xintercept = 1, lty=2, col="red")+
+  geom_hline(yintercept = 1, lty=2, col="red")+ ggtitle(cl)
+ 
+}) )
+
+
+
+
+
+
+
+sel <- tmp_clusters==5  & dblts_perc < 3/50  & nn_inothercluster < 1
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
-         age = factor(age),
          diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
          region    = factor(region))
 rownames(coldat) <- coldat$sample
@@ -342,17 +383,19 @@ dds <- DESeqDataSetFromMatrix( pseudobulks,
 # DESeq's LTR for this (see mail to Simon at mid-September 2019).
 dds <- DESeq(dds, 
              parallel=TRUE, BPPARAM=MulticoreParam(20))
-
+res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+table(res_df$padj < .1)  
 
 
 
 # Plot individual genes
-g <- "RGS4"
-plotCounts(dds, g, intgroup = c("sex", "region", "diagnosis"))
+g <- "AQP4"
+g <- "PLP1"
+# plotCounts(dds, g, intgroup = c("sex", "region", "diagnosis"))
 data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs, sel) %>%
-   filter(sel) %>%
+   # filter(sel) %>%
   ggplot(aes(X1, X2, col = Gene / sfs / mean(1/sfs))) + geom_point(size=.1)+coord_fixed()+
-  col_pwr_trans(1/2, g) + facet_wrap(~ region + diagnosis)
+  col_pwr_trans(1/2, g) #+ facet_wrap(~ region + diagnosis)
 
 
 
@@ -365,7 +408,7 @@ sfari <- read_csv(file.path("~", "asd_analysis",
   rename_all(make.names)
 in_database <- sfari$gene.symbol[ sfari$gene.symbol %in% gene_info$V2 ]
 
-dds <- dds_32k
+
 degs <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
   filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% pull(Gene)
 in_test     <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>%
@@ -393,5 +436,49 @@ data.frame(deg_umap, cl = factor(deg_cl$membership)) %>% ggplot(aes(X1, X2, col=
 
 
 groups(deg_cl)$`1`  # investigate further?
+
+
+
+
+
+
+
+
+
+
+# DE playground -----------------------------------------------------------
+
+# DE testing has to follow simple assumptions to be feasible, as there are
+# infinitely many possible distributions the counts could have in controls and treatments,
+# respectively.
+# For example, perhaps in my 20 control patients a gene is distributed according to
+# a NB in some and according to a composite of two NBs in other samples, and another
+# gene according to a composite of three NBs with different means.
+# It is infeasible to model this with NB/composite-NB fits.
+# Instead, let's think about genes we would be interested in as DEGs in scRNAseq:
+# such a gene would in the treated samples follow distributions (NB / composite-NBs)
+# whose parameters are sampled from a different entity - e.g. they could be 
+# composite-NBs composed of three instead of two NBs, or they could be
+# composite-NBs around the same two means, but more cells with the higher mean, etc..
+# Again, it is completely infeasible to model this or do fits with EM algorithm or whatever,
+# instead we have to come up with simple assumptions that describe this well.
+
+# 
+
+
+g <- "RGS4"
+
+data.frame(
+  sample = aggregate(x = sfs[sel], by = list(sample=cellinfo$sample[sel]), FUN = median)[, 1],
+  sf   = aggregate(x = sfs[sel], by = list(sample=cellinfo$sample[sel]), FUN = median)$x,
+  mean = aggregate(x = norm_counts[g, sel], by = list(sample=cellinfo$sample[sel]), FUN = mean)$x,
+  sdev   = aggregate(x = norm_counts[g, sel], by = list(sample=cellinfo$sample[sel]), FUN = sd)$x,
+  stringsAsFactors = F
+) %>% left_join( select(sampleTable, sample, diagnosis), by = "sample" ) %>% 
+  ggplot() + geom_point(aes(mean, sdev, col = diagnosis))  + scale_x_log10()  + scale_y_log10()
+
+
+
+
 
 
