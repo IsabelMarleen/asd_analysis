@@ -277,6 +277,40 @@ plot(rowMeans( a$nn.index > nrow(pca$x) ), pch=20, cex=.4); abline(h = nrow(pca$
 
 
 
+# Markers and doublets ----------------------------------------------------
+
+
+# "MOC","PTPRC" 
+markers <- c(astro="AQP4",
+             astro="GFAP",
+             oligod="PLP1", 
+             schwann="MPZ",
+             Tcell="SKAP1",
+             OPC="TNR",
+             OPC="PDGFRA",
+             Endothel="VWF",
+             pericytes ="PDGFRB",
+             microglia="CD68",
+             microglia="CD4",
+             neurons="SYT1",
+            stroma= "LAMA2",
+            motorNeuron ="THY1",
+            motorNeuron = "NEFL")
+
+for(i in 1:length(markers)){
+  g <- markers[i]
+png(file.path("~", "asd_analysis","marker_umap", paste0(names(markers)[i], "_",g,".png")),
+    width = 800, height = 800)
+p <- data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs) %>%
+  ggplot(aes(X1, X2, col = Gene / sfs / mean(1/sfs))) + geom_point(size=.1)+coord_fixed()+
+  col_pwr_trans(1/2, g) + ggtitle(names(markers)[i])
+print(p)
+dev.off()
+}
+
+
+
+
 
 
 
