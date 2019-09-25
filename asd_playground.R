@@ -36,35 +36,46 @@ Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]   and  colSum
 
 
 
-# find informative genes    (rsession goes up to 25 GB RAM [htop])
+
+
+
+
+# Preprocessing -----------------------------------------------------------
+
+# you need umap_euc, sfs and norm_counts:
 sfs <- colSums(counts)
 norm_counts <- t(t(Ccounts) / colSums(Ccounts))
 rownames(norm_counts) <- rownames(Ccounts)
+load(file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
+
+
+
+
+# other computations:
 poisson_vmr <- mean(1/sfs)
 gene_means <- rowMeans( norm_counts )
 gene_vars <- rowVars_spm( norm_counts )
 cells_expressing <- rowSums( counts != 0 )
 is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  cells_expressing > 100
-
 plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
 points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
-
-
 
 # PCA and UMAP   (goes up to 18 GB of RAM)
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
 umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40)
-
 umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 10, n_threads = 40)
 
+save(umap_euc,
+     file = file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
 
 
 
 
 
-# Clusters and doublets ---------------------------------------------------
+
+# Clusters ---------------------------------------------------
 
 
 g <- "SYT1"    # Neuron marker
@@ -91,45 +102,34 @@ for(i in 1:ncol(nn_cells$nn.index))
 cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirected") )
 
 tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 22, 19, 17) ~ 5, TRUE ~ tmp_clusters)
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 3, 2, 8, 18, 19, 20, 23) ~ 5, TRUE ~ tmp_clusters)
 
 
-data.frame(umap_euc, cl = factor(tmp_clusters)) %>%
-  ggplot()+geom_point(aes(X1, X2, col=cl), size=.1)
+# Louvain clusters 
+p_louv <- ggplot()+
+  geom_point(data = data.frame(umap_euc, cl=factor(tmp_clusters)),
+             aes(X1, X2, col = cl), size = .1) +
+  geom_label(data = group_by(data.frame(umap_euc, cl=factor(tmp_clusters)), cl) %>% summarise(X1=mean(X1), X2=mean(X2)), 
+             aes(X1, X2, label = cl))
+p_louv
 
-
-
-
-# plot clusters
-df2 <- data.frame(cell = colnames(counts),
-                  umap_euc,
-                  cluster = factor(tmp_clusters),
-                  stringsAsFactors = F) %>%
-  left_join( select(cellinfo, cell, cluster) %>% dplyr::rename(paper_cluster = cluster), by="cell" )
-labels_louvain2 <- df2 %>% group_by(cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
-labels_paper2 <- df2 %>% group_by(paper_cluster) %>% summarise(X1 = mean(X1), X2=mean(X2))
-p_louv <- ggplot() + 
-  geom_point(data=df2,
-             aes(X1, X2, col = cluster),
-             size = .05) + coord_fixed()+
-  geom_label(data = labels_louvain2,
-             aes(X1, X2, col = cluster, label = cluster),
-             fontface = "bold")+ theme(legend.position = "none")
-p_papcl <- ggplot() + 
-  geom_point(data=df2,
-             aes(X1, X2, col = paper_cluster),
-             size = .05) + coord_fixed()+
-  geom_label(data = labels_paper2,
-             aes(X1, X2, col = paper_cluster, label = paper_cluster),
-             fontface = "bold")+ theme(legend.position = "none")
-p_louv # clusters from louvain
-p_papcl # clusters from paper
+# clusters from paper
+ggplot()+
+  geom_point(data =data.frame(cell = colnames(counts), umap_euc) %>%
+               left_join(select(cellinfo, cell, cluster), by="cell"),
+             aes(X1, X2, col = cluster), size = .1) +
+  geom_label(data = data.frame(cell = colnames(counts), umap_euc) %>%
+               left_join(select(cellinfo, cell, cluster), by = "cell") %>% group_by(cluster) %>%
+               summarise(X1=mean(X1), X2=mean(X2)),
+             aes(X1, X2, label = cluster))
 
 
 
 
 
-# clean out doublets and ambiguous cells ----------------------------------
+
+
+# Doublets and ambiguous cells ----------------------------------
 
 
 # number of NN from different cluster:
@@ -163,8 +163,8 @@ doublet_pcs <- predict(pca,
 
 # Alternative 1 (clearer):
 a <- FNN::get.knn(rbind(pca$x, doublet_pcs), k = 50)
-nn <- a$nn.index
-nn_dists <- a$nn.dist
+nn_doublets <- a$nn.index
+nndists_doublets <- a$nn.dist
 
 # Alternative 2 (faster):
 library( RcppAnnoy )
@@ -179,17 +179,37 @@ rm(featureMatrix, annoy)
 
 
 # percentage of synthetic doublets doublets in neighborhood for each cell:
-dblts_perc <- rowMeans( nn > nrow(pca$x) )[ 1:nrow(pca$x) ]
+dblts_perc <- rowMeans( nn_doublets > nrow(pca$x) )[ 1:nrow(pca$x) ]
 
 
 
 # Run UMAP  with Annoy's output
-ump2 <- uwot::umap( NULL, nn_method = list( idx=nn, dist=nn_dists), 
+ump2 <- uwot::umap( NULL, nn_method = list( idx=nn_doublets, dist=nndists_doublets), 
                     n_threads=40, spread = 15, verbose=TRUE )
 
 
 
 is_synth <- 1:nrow(ump2) > nrow(pca$x)
+
+
+
+
+
+
+
+
+
+  # savepoint ---------------------------------------------------------------
+# save(list = c("nn_doublets", "nndists_doublets", "cellsA", "cellsB",
+#                 "dblts_perc", "is_synth", "ump2"),
+#      file = file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
+# 
+# save(list = c("cl_louvain", "tmp_clusters", "nn_cells", "nn_inothercluster"),
+#      file = file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
+
+# read in data and do preprocessing, then read in this and you're good to go:
+load(file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
+load(file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
 
 
 
@@ -208,14 +228,15 @@ cl_cols <- unique(gg$data[[2]][c("label","colour")])
 plot_grid(plotlist = c(list(p_louv),
 lapply(c(21,1, 9, 6, 13), function(cl){
   ggplot()+coord_fixed()+
-  geom_point(data=data.frame(ump2[1:nrow(pca$x),]), aes(X1, X2), col="grey", size=.05)+
+  geom_point(data=data.frame(ump2[!is_synth,]), aes(X1, X2), col="grey", size=.05)+
   geom_point(data = data.frame(ump2[is_synth,],
                                cl_contributed = tmp_clusters[cellsA] == cl | tmp_clusters[cellsB] == cl),
              aes(X1, X2, col = cl_contributed), size=.05) +
    scale_color_manual(values = c(`FALSE`="grey", `TRUE`=cl_cols[cl_cols$label==cl,"colour"])) +
     
-    geom_label(data = labels_df2[labels_df2$cluster == cl,],
-               aes(X1, X2, label = cluster, fill=cluster),
+    geom_label(data = data.frame(cell=colnames(counts), ump2[!is_synth,], cluster = tmp_clusters)%>%
+                 filter(cluster == cl) %>% summarise(X1=mean(X1), X2=mean(X2)),
+               aes(X1, X2, label = cl),
                fontface = "bold")+ theme(legend.position = "none") +
    scale_fill_manual(values = cl_cols[cl_cols$label==cl,"colour"]) +
   
