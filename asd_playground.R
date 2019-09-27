@@ -129,7 +129,7 @@ p_louv <- ggplot()+
 p_louv
 
 # clusters from paper
-ggplot()+
+p_paper <- ggplot()+
   geom_point(data =data.frame(cell = colnames(counts), umap_euc) %>%
                left_join(select(cellinfo, cell, cluster), by="cell"),
              aes(X1, X2, col = cluster), size = .1) +
@@ -137,7 +137,7 @@ ggplot()+
                left_join(select(cellinfo, cell, cluster), by = "cell") %>% group_by(cluster) %>%
                summarise(X1=mean(X1), X2=mean(X2)),
              aes(X1, X2, label = cluster))
-
+p_paper
 
 # 
 # save(list = c("cl_louvain", "tmp_clusters", "nn_cells", "nn_inothercluster"),
@@ -207,7 +207,7 @@ rm(featureMatrix, annoy)
 
 
 # percentage of synthetic doublets in neighborhood for each cell:
-dblts_perc <- rowMeans( nn_doublets > nrow(pca$x) )[ 1:nrow(pca$x) ]
+dblts_perc <- rowMeans( nn_doublets > ncol(counts) )[ 1:ncol(counts) ]
 
 
 
@@ -315,6 +315,10 @@ dev.off()
 
 
 
+
+
+
+
 # DESeq -------------------------------------------------------------------
 library(DESeq2)
 library(BiocParallel)
@@ -326,7 +330,7 @@ ggplot() + coord_fixed()+
   geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1) +
   geom_label(data=group_by(tmp, cl) %>% summarise(X1=mean(X1), X2=mean(X2)), aes(X1, X2, label=cl))
 
-tmp <- as.matrix(table(sample=cellinfo$sample, clean = dblts_perc == 0  & nn_inothercluster < 1))
+tmp <- as.matrix(table(sample=cellinfo$sample, clean = dblts_perc < 3/50  & nn_inothercluster < 1))
 data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2])) %>% left_join(sampleTable, by="sample") %>% ggplot(aes(sample, dirtyProportion, col = diagnosis))+geom_point()
 
 
@@ -335,9 +339,9 @@ data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2
 
 
 # compare ASD vs control for several clusters:
-res_clean <- lapply(c(10, 13, 6, 1, 21, 17), function(cl){
+res_clean <- lapply(c(5, 16, 21, 4, 11, 13, 3, 14, 7, 23), function(cl){
   print(cl)
-  sel <- tmp_clusters== cl      & dblts_perc == 0  & nn_inothercluster < 1
+  sel <- tmp_clusters== cl      & dblts_perc < 3/50  & nn_inothercluster < 1
   
   pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
   coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
@@ -347,28 +351,64 @@ res_clean <- lapply(c(10, 13, 6, 1, 21, 17), function(cl){
            region    = factor(region))
   rownames(coldat) <- coldat$sample
   dds <- DESeqDataSetFromMatrix( pseudobulks, coldat[colnames(pseudobulks), ],
-                                 design = ~ sex + age + diagnosis )
+                                 design = ~ sex + age + region + diagnosis )
   dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(20))
   res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") 
   list(cluster = cl, ncells = sum(sel), res = res_df ) 
 })
 
+names(res_clean) <- unlist(lapply(res_clean, function(x) x$cluster))
+
 
 plot_grid(plotlist = lapply(names(res_clean), function(cl){
  data.frame(padj_clean=res_clean[[cl]]$res$padj,
            padj_dirty=res_dirty[[cl]]$res$padj) %>% ggplot(aes(-log10(padj_dirty), -log10(padj_clean)))+
-  geom_point()+coord_fixed() + geom_abline() + geom_vline(xintercept = 1, lty=2, col="red")+
+  geom_point(size=.1)+coord_fixed() + geom_abline() + geom_vline(xintercept = 1, lty=2, col="red")+
   geom_hline(yintercept = 1, lty=2, col="red")+ ggtitle(cl)
  
 }) )
 
 
+# Compare to sfari database
+sfari <- read_csv(file.path("~", "asd_analysis",
+                            "SFARI-Gene_genes_08-29-2019release_09-24-2019export.csv")) %>%
+  rename_all(make.names)
+in_database <- sfari$gene.symbol[ sfari$gene.symbol %in% gene_info$V2 ]
+
+
+tmp <- lapply(names(res_clean), function(cl){
+  print(cl)
+  degs <-    res_dirty[[cl]]$res %>% filter(padj < .1) %>% pull(Gene)
+  in_test <- res_dirty[[cl]]$res %>% filter(!is.na(padj)) %>% pull(Gene)
+  if(length(degs)==0){p_dirty <- NA}else{
+  p_dirty <- fisher.test(matrix(table( in_test %in% degs, in_test %in% in_database),
+                     ncol=2,
+                     dimnames = list(is_deg = c("no","yes"), in_database = c("no","yes"))))$p.value
+  }
+  degs <-    res_clean[[cl]]$res %>% filter(padj < .1) %>% pull(Gene)
+  in_test <- res_clean[[cl]]$res %>% filter(!is.na(padj)) %>% pull(Gene)
+  if(length(degs)==0){p_clean <- NA}else{
+  p_clean <- fisher.test(matrix(table( in_test %in% degs, in_test %in% in_database),
+                     ncol=2,
+                     dimnames = list(is_deg = c("no","yes"), in_database = c("no","yes"))))$p.value
+  }
+  return(data.frame(cluster=cl, p_dirty = p_dirty, p_clean = p_clean, stringsAsFactors = F))
+}) %>% bind_rows
+
+tmp %>% ggplot(aes(-log10(p_dirty), -log10(p_clean)))+geom_point()+geom_abline() + ggtitle("DEG enrichment")
+
+data.frame(
+  cluster = names(res_clean),
+  ncells_clean = lapply(res_clean, function(x) x$ncells) %>% unlist,
+  ncells_dirty = lapply(res_dirty, function(x) x$ncells) %>% unlist
+) %>% left_join(tmp) %>% head
 
 
 
 
 
-sel <- tmp_clusters==5  & dblts_perc < 3/50  & nn_inothercluster < 1
+
+sel <- tmp_clusters %in% c(12, 14, 7, 23)  & dblts_perc < 3/50  & nn_inothercluster < 1
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
@@ -378,7 +418,7 @@ rownames(coldat) <- coldat$sample
 
 dds <- DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
-                               design = ~ sex + age + diagnosis )
+                               design = ~ sex + region + diagnosis )
 # For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
 # DESeq's LTR for this (see mail to Simon at mid-September 2019).
 dds <- DESeq(dds, 
@@ -388,36 +428,48 @@ table(res_df$padj < .1)
 
 
 
+
+res_df %>% filter(padj < .1, baseMean > 50) %>% arrange(desc(abs(log2FoldChange))) %>% head(n=20)
+
+Gene   baseMean log2FoldChange     lfcSE      stat       pvalue        padj
+1  MTND2P28   60.25608      2.7302927 0.6788128  4.022159 5.766718e-05 0.012415743
+2     HSPB1   53.25841     -1.8056395 0.5872707 -3.074629 2.107647e-03 0.060330707
+3    MT-ND3  870.50560      1.4187626 0.3279703  4.325887 1.519194e-05 0.006305464
+4   MT-ND4L  167.39401      1.3428971 0.3245225  4.138071 3.502378e-05 0.009425774
+5    MT-ND4 1653.17914      1.3137104 0.2869792  4.577720 4.700708e-06 0.003935798
+6  MTATP6P1  361.22570      1.0486883 0.3376722  3.105640 1.898675e-03 0.057480286
+7    MT-CO3 2461.32824      1.0356872 0.2742279  3.776739 1.588948e-04 0.020123562
+8    MT-CO2 1831.71986      0.9955536 0.2746291  3.625084 2.888675e-04 0.026873597
+9    MT-ND1  658.56180      0.9821369 0.2345878  4.186650 2.831022e-05 0.008585289
+10  MT-ATP6  874.24854      0.9531860 0.2803692  3.399752 6.744688e-04 0.038315943
+11   MT-ND2  800.02263      0.9369508 0.2443916  3.833810 1.261736e-04 0.017607065
+12     TTF2   50.01172     -0.8898189 0.1978098 -4.498355 6.848117e-06 0.004549986
+13   MT-CYB  718.85866      0.8116936 0.2152989  3.770077 1.631970e-04 0.020272786
+14    ZMYM3   57.76922      0.8077571 0.2202002  3.668286 2.441821e-04 0.024838436
+15      KIT  169.95008      0.7833860 0.1813739  4.319178 1.566115e-05 0.006305464
+16    VMA21   68.14624      0.7507723 0.2401887  3.125760 1.773462e-03 0.055716836
+17    CLIP3  143.12863      0.7417990 0.1567059  4.733701 2.204624e-06 0.003524178
+18     PLK2   55.06825      0.7178509 0.1663288  4.315856 1.589859e-05 0.006305464
+19    CXXC4   52.21341      0.7035908 0.1437565  4.894323 9.864475e-07 0.002973350
+20    KLHL9   61.72171      0.6984751 0.2225714  3.138207 1.699847e-03 0.054623451
+
+
+
+
+
+
 # Plot individual genes
-g <- "AQP4"
-g <- "PLP1"
-# plotCounts(dds, g, intgroup = c("sex", "region", "diagnosis"))
+g <- "MT-ND3"
+plotCounts(dds, g, intgroup = c("sex", "region", "diagnosis"))
 data.frame(umap_euc, cellinfo, Gene = Tcounts[, g], sfs, sel) %>%
    # filter(sel) %>%
   ggplot(aes(X1, X2, col = Gene / sfs / mean(1/sfs))) + geom_point(size=.1)+coord_fixed()+
-  col_pwr_trans(1/2, g) #+ facet_wrap(~ region + diagnosis)
+  col_pwr_trans(1/2, g) + facet_wrap(~ region + diagnosis)
 
 
 
 
 
-# Compare to sfari database
-
-sfari <- read_csv(file.path("~", "asd_analysis",
-                            "SFARI-Gene_genes_08-29-2019release_09-24-2019export.csv")) %>%
-  rename_all(make.names)
-in_database <- sfari$gene.symbol[ sfari$gene.symbol %in% gene_info$V2 ]
-
-
-degs <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene") %>%
-  filter(padj < .1) %>% arrange(desc(log2FoldChange)) %>% pull(Gene)
-in_test     <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>%
-                   rownames_to_column("Gene") %>% filter(!is.na(padj)) %>% pull(Gene) 
-
-for_fisher <- matrix(table( in_test %in% degs, in_test %in% in_database), ncol=2,
-       dimnames = list(is_deg = c("no","yes"), in_database = c("no","yes")))
-
-fisher.test(for_fisher)
 
 
 
@@ -438,6 +490,50 @@ data.frame(deg_umap, cl = factor(deg_cl$membership)) %>% ggplot(aes(X1, X2, col=
 groups(deg_cl)$`1`  # investigate further?
 
 
+
+
+
+
+
+
+# NRGN neurons ------------------------------------------------------------
+
+pseudo2 <- pseudobulks
+rbind(data.frame(cl="nrgn1", sf=colSums(pseudo1)) %>% rownames_to_column("sample"),
+  data.frame(cl="nrgn2", sf=colSums(pseudo2))%>% rownames_to_column("sample")) %>%
+  left_join(select(sampleTable, diagnosis, sample), by ="sample") %>%
+  ggplot(aes(cl, sf, col = diagnosis))+geom_jitter(height=0)+
+  scale_y_log10()
+
+sel <- cellinfo$cluster == "Neu-NRGN-II"  #grepl("NRGN", cellinfo$cluster)
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+  mutate(individual = factor(individual),
+         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+         sex = factor(sex),
+         region    = factor(region))
+rownames(coldat) <- coldat$sample
+
+dds <- DESeqDataSetFromMatrix( pseudobulks,
+                               coldat[colnames(pseudobulks), ],
+                               design = ~ sex + region + diagnosis )
+dds <- DESeq(dds, 
+             parallel=TRUE, BPPARAM=MulticoreParam(20))
+res_NRGN1 <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+
+
+
+data.frame(
+  Gene =     rownames(res_pooledNRGN),
+  p_pooled = res_pooledNRGN$padj,
+  p_nrgn1  = res_NRGN1$padj,
+  p_nrgn2  = res_NRGN2$padj
+) %>%
+  ggplot(aes(-log10(p_nrgn1), -log10(p_pooled)))+geom_point()+coord_fixed() + geom_abline()
+
+
+# ASD/cntrl and clusterI/II are perfectly mixed, II is just 2.5x larger than I:
+filter(cellinfo, grepl("NRGN", cluster)) %>% select(cluster, diagnosis) %>% table()
 
 
 
