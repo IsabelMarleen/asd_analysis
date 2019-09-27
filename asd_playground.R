@@ -121,7 +121,7 @@ tmp_clusters <- case_when(tmp_clusters %in% c(3, 9, 18) ~ 3, TRUE ~ tmp_clusters
 
 
 # Louvain clusters 
-p_louv <- ggplot()+
+p_louv <- ggplot()+ coord_fixed() +
   geom_point(data = data.frame(umap_euc, cl=factor(tmp_clusters)),
              aes(X1, X2, col = cl), size = .1) +
   geom_label(data = group_by(data.frame(umap_euc, cl=factor(tmp_clusters)), cl) %>%summarise(X1=mean(X1), X2=mean(X2)), 
@@ -129,7 +129,7 @@ p_louv <- ggplot()+
 p_louv
 
 # clusters from paper
-p_paper <- ggplot()+
+p_paper <- ggplot()+ coord_fixed()+
   geom_point(data =data.frame(cell = colnames(counts), umap_euc) %>%
                left_join(select(cellinfo, cell, cluster), by="cell"),
              aes(X1, X2, col = cluster), size = .1) +
@@ -324,9 +324,13 @@ library(DESeq2)
 library(BiocParallel)
 
 # visualize dirty cells we clean away:
-tmp <- data.frame(umap_euc, clean = dblts_perc < 3/50  & nn_inothercluster < 1, cl = factor(tmp_clusters))
+tmp <- data.frame(umap_euc,
+                  diagnosis = cellinfo$diagnosis,
+                  clean = dblts_perc < 3/50  & nn_inothercluster < 1,
+                  Gene = Tcounts[, "TTF2"] / sfs/mean(1/sfs),
+                  cl = factor(tmp_clusters))
 ggplot() + coord_fixed()+
-  geom_point(data=filter(tmp,  clean), aes(X1, X2), col = "grey", size=.1) +
+  geom_point(data=filter(tmp,  clean), aes(X1, X2, col = cl), size=.1) +
   geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1) +
   geom_label(data=group_by(tmp, cl) %>% summarise(X1=mean(X1), X2=mean(X2)), aes(X1, X2, label=cl))
 
@@ -335,7 +339,161 @@ data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2
 
 
 
+# compute for a single cluster
+sel <-Tcounts[, "SYT1"] > 1 & Tcounts[, "CUX2"] > 0  & dblts_perc < 3/50  & nn_inothercluster < 1
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+  mutate(individual = factor(individual),
+         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+         region    = factor(region))
+rownames(coldat) <- coldat$sample
 
+dds <- DESeqDataSetFromMatrix( pseudobulks,
+                               coldat[colnames(pseudobulks), ],
+                               design = ~ sex + region + age + diagnosis )
+# For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
+# DESeq's LTR for this (see mail to Simon at mid-September 2019).
+dds <- DESeq(dds, 
+             parallel=TRUE, BPPARAM=MulticoreParam(20))
+res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+table(res_df$padj < .1)  
+res_df %>% arrange(padj) %>% head(n=20)
+
+
+
+cors <- cor(
+ sqrt( Tcounts[sel, "EPB41L5"] / sfs[sel] ),
+ as.matrix(sqrt( Tcounts[sel, ] / sfs[sel] ))
+)
+
+
+
+
+# correlation-like stuff --------------------------------------------------
+clean <- dblts_perc < 3/50  & nn_inothercluster < 1
+
+s_50 <- rowSums( matrix(sfs[ nn_cells ], ncol = 50) )   
+syt1_50 <- rowSums( matrix(Tcounts[, "SYT1"][ nn_cells ], ncol = 50) )   / 50
+cux2_50 <- rowSums( matrix(Tcounts[, "CUX2"][ nn_cells ], ncol = 50) )   / 50
+ttf2_50 <- rowSums( matrix(Tcounts[, "TTF2"][ nn_cells ], ncol = 50) )   / 50
+
+data.frame(umap_euc, s_50,
+           syt1_50,
+           cux2_50,
+           ttf2_50,
+           clean,
+           diagnosis = cellinfo$diagnosis,
+           syt1_raw = Tcounts[, "SYT1"],
+           ttf2_raw = Tcounts[, "TTF2"]
+           ) %>%
+  gather(Gene, knn, syt1_50, cux2_50, ttf2_raw) %>% 
+  ggplot(aes(X1, X2, col= knn / s_50 / mean(1/s_50)))+coord_fixed()+
+  geom_point(size=.1) + facet_wrap(~ diagnosis + Gene) +
+  scale_color_gradientn(
+    trans = power_trans(1/2),
+    colours = rev(rje::cubeHelix(100))[5:100],
+    na.value = adjustcolor("grey", alpha.f = .4),
+    labels = semi_scientific_formatting
+  )
+
+
+
+
+# markers for cortical layers, from this paper (Fig. 6):
+#   Large-Scale Cellular-Resolution Gene Profiling in Human Neocortex Reveals
+#   Species-Specific Molecular Signatures
+#   Zeng, Shen, ..., Kleinman, Jones
+#   Cell 2012
+l1 <- c("NDNF", # aka "C4orf31"
+        "CHRNA7_ENSG00000175344", "CHRNA7_ENSG00000274542", # CHRNA7 exists twice
+        "CNR1","CXCL14","RELN","INPP4B")
+l23<-c("LAMP5", # aka: "C20orf103",
+  "GSG1L","IGSF11","KCNIP2","PVRL3","RASGRF2","SYT17","WFS1","C1QL2",
+  "CARTPT","CALB1","CUX2","ATP2B4","CBLN2","CCK","FXYD6","PENK","CACNA1E","KCNH4",
+  "SCN3B","COL24A1","CRYM","TPBG","BEND5","COL6A1","PRSS12","SCN4B","SYT2","LGALS1",
+  "MFGE8","SV2C","SNCG")
+
+l4 <- c("RORB","CACNG5","CHRNA3","GRIK4","KCNIP1","PDYN")
+
+l5 <- c(
+  "TRIB2","CPNE7","ETV1","FAM3C","TOX","VAT1L","KIAA1456","HTR2C"
+)
+
+l56 <- c("PCDH20_ENSG00000280165", "PCDH20_ENSG00000197991", # PCDH20 exists twice in our data
+  "B3GALT2","KCNK2","PCP4","PDE1A","RPRM","RXFP1","GABRA5","KCNA1"
+)
+
+l6 <- c(
+  "CDH24","CYR61","FOXP2","NTNG2","SYT10","SYT6","TH","TLE4","TMEM163","AKR1C2","AKR1C3","ANXA1","NPY2R","OPRK1","PCDH17","SEMA3C","SYNPR"
+)
+
+l6b_wm <- c( # so called "subplate neurons". Interstitial neurons are from white matter (wm)
+  "ADRA2A","CTGF","NR4A2"
+)
+
+
+the_markers <- c(l1, l23, l4, l5, l56, l6, l6b_wm)
+
+# from Schirmer Science paper:
+interneuron_markers <- c("GAD1", "GAD2")
+
+gene_means <- rowMeans( norm_counts[, tmp_clusters == 5] )
+gene_vars <- rowVars_spm( norm_counts[, tmp_clusters == 5] )
+frequent <- rowSums(norm_counts[, tmp_clusters == 5] != 0)  >  .01 * sum(tmp_clusters == 5)
+tmp <- data.frame(gene = names(gene_means), gene_means, gene_vars,
+                  is_marker = names(gene_means) %in% the_markers,
+                  frequent, stringsAsFactors = F)  %>%
+ mutate(use_marker = is_marker & frequent & gene_vars/gene_means > 1.5 * mean(1/sfs[tmp_clusters==5]))
+ggplot() +
+ geom_point(data = filter(tmp, !is_marker), aes(gene_means, gene_vars/gene_means), size=.1, col="grey")+
+ geom_point(data = filter(tmp, is_marker & !use_marker), aes(gene_means, gene_vars/gene_means), size=.5, col="black")+
+ geom_point(data = filter(tmp, use_marker), aes(gene_means, gene_vars/gene_means), size=.5, col="red")+
+  scale_x_log10()+scale_y_log10() +
+  geom_hline(yintercept = mean(1/sfs[tmp_clusters==5]))+
+  geom_hline(yintercept = 1.5 * mean(1/sfs[tmp_clusters==5]), linetype="dashed", col="red")
+
+# Correlation:
+markers_use <- the_markers[the_markers %in% (filter(tmp, use_marker) %>% pull(gene))]
+cors <- cor(as.matrix(t(sqrt(norm_counts[markers_use,
+              tmp_clusters == 5 & clean] ))))
+diag(cors) <- NA
+library(RColorBrewer)
+pheatmap::pheatmap(cors,
+                   color = colorRampPalette(rev(brewer.pal(n = 7, name =
+                                                             "RdBu")))(100),
+                   cluster_rows = F, cluster_cols = F)
+
+
+# where are the Layer4 Neurons?
+data.frame(umap_euc,
+           clean,
+           sfs,
+           diagnosis = cellinfo$diagnosis,
+           louv = tmp_clusters,
+           as.matrix(Tcounts[, l4[l4 %in% markers_use]])
+           ) %>% 
+  gather(Gene, UMI, -X1, -X2, -clean, -sfs, -diagnosis, - louv) %>%
+  ggplot(aes(X1, X2, col = UMI/sfs/mean(1/sfs)))+geom_point(size=.1) + coord_fixed()+
+  col_pwr_trans(1/10)+
+  facet_wrap(~Gene)
+
+# they use RORB as marker for L4, but it's correlated highly with these l5/6 markers:
+l56_and_rorb <- c("RORB","TOX","KIAA1456","PDE1A","RXFP1","FOXP2")
+  
+data.frame(umap_euc,
+           sfs,
+           as.matrix(Tcounts[, l56_and_rorb])) %>%
+  gather(Gene, UMI, -X1, -X2, -sfs) %>%
+  ggplot(aes(X1, X2, col = UMI/sfs/mean(1/sfs)))+geom_point(size=.1) + coord_fixed()+
+  col_pwr_trans(1/10)+
+  facet_wrap(~Gene)
+
+
+
+
+
+
+# more DESeq stuff --------------------------------------------------------
 
 
 # compare ASD vs control for several clusters:
@@ -407,24 +565,6 @@ data.frame(
 
 
 
-
-sel <- tmp_clusters %in% c(12, 14, 7, 23)  & dblts_perc < 3/50  & nn_inothercluster < 1
-pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
-coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
-  mutate(individual = factor(individual),
-         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
-         region    = factor(region))
-rownames(coldat) <- coldat$sample
-
-dds <- DESeqDataSetFromMatrix( pseudobulks,
-                               coldat[colnames(pseudobulks), ],
-                               design = ~ sex + region + diagnosis )
-# For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
-# DESeq's LTR for this (see mail to Simon at mid-September 2019).
-dds <- DESeq(dds, 
-             parallel=TRUE, BPPARAM=MulticoreParam(20))
-res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
-table(res_df$padj < .1)  
 
 
 
@@ -498,12 +638,7 @@ groups(deg_cl)$`1`  # investigate further?
 
 # NRGN neurons ------------------------------------------------------------
 
-pseudo2 <- pseudobulks
-rbind(data.frame(cl="nrgn1", sf=colSums(pseudo1)) %>% rownames_to_column("sample"),
-  data.frame(cl="nrgn2", sf=colSums(pseudo2))%>% rownames_to_column("sample")) %>%
-  left_join(select(sampleTable, diagnosis, sample), by ="sample") %>%
-  ggplot(aes(cl, sf, col = diagnosis))+geom_jitter(height=0)+
-  scale_y_log10()
+
 
 sel <- cellinfo$cluster == "Neu-NRGN-II"  #grepl("NRGN", cellinfo$cluster)
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
@@ -516,20 +651,20 @@ rownames(coldat) <- coldat$sample
 
 dds <- DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
-                               design = ~ sex + region + diagnosis )
+                               design = ~ sex + region + age+ diagnosis )
 dds <- DESeq(dds, 
              parallel=TRUE, BPPARAM=MulticoreParam(20))
-res_NRGN1 <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+res_NRGN2 <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
 
 
 
 data.frame(
-  Gene =     rownames(res_pooledNRGN),
-  p_pooled = res_pooledNRGN$padj,
+  Gene =     rownames(res_NRGN1),
+  # p_pooled = res_pooledNRGN$padj,
   p_nrgn1  = res_NRGN1$padj,
   p_nrgn2  = res_NRGN2$padj
 ) %>%
-  ggplot(aes(-log10(p_nrgn1), -log10(p_pooled)))+geom_point()+coord_fixed() + geom_abline()
+  ggplot(aes(-log10(p_nrgn1), -log10(p_nrgn2)))+geom_point()+coord_fixed() + geom_abline()
 
 
 # ASD/cntrl and clusterI/II are perfectly mixed, II is just 2.5x larger than I:
