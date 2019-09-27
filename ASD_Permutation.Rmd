@@ -30,7 +30,7 @@ counts <- Seurat::Read10X("~/tmp/ASD/rawMatrix")
 ##Subset and Normalise Counts
 Doublecheck whether the column names in the count matrix and the cell barcodes in the "meta.txt" file are the identical, then remove genes that do noty appear in any cell.
 ```{r}
-stopifnot( identical( meta$cell, colnames(counts) ) )
+stopifnot( identical( cellinfo$cell, colnames(counts) ) )
 counts <- counts[ rowSums(counts) > 0,  ]
 ```
 
