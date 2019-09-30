@@ -329,27 +329,34 @@ dev.off()
 
 
 true_ids <- 1:ncol(counts)
+
 # for every cell, find nearest control cells:
 controlNNs <- get.knnx(
   data = pca$x[cellinfo$diagnosis == "Control",],
   query =pca$x,
-  k = 50
-)
-# convert control-cell-indices to all-cell-indices:
+  k = 50)
+# indices should reference all cells, not just Controls:
 controlNNs <- matrix(true_ids[cellinfo$diagnosis == "Control"][controlNNs$nn.index], ncol = 50)
 # add index of the cell itself as first column:
 controlNNs <- cbind(true_ids, controlNNs)
 
-i <- sample(which(cellinfo$diagnosis != "Control" & tmp_clusters == 5), 1)
+# same for neighboring ASD cells:
+asdNNs <- get.knnx(
+  data = pca$x[cellinfo$diagnosis == "ASD",],
+  query =pca$x,
+  k = 50)
+asdNNs <- matrix(true_ids[cellinfo$diagnosis == "ASD"][asdNNs$nn.index], ncol = 50)
+asdNNs <- cbind(true_ids, asdNNs)
+
+# plot a cell (green) with its control neighbors (blue) and it's ASD neighbors (red):
+i <- sample(1:ncol(counts), 1)
 ggplot() + coord_fixed() + 
   geom_point(data= data.frame(umap_euc), aes(X1, X2), col="grey", size=.1) +
-  geom_point(data= data.frame(umap_euc[controlNNs[i,-1],]), aes(X1, X2), col="black", size=.5) +
-  geom_point(data= data.frame(umap_euc[controlNNs[i, 1],, drop=FALSE]), aes(X1, X2), col="red", size=.5) +
-  ggtitle(cellinfo$diagnosis[i])
-
-
-
-
+  geom_point(data= data.frame(umap_euc[controlNNs[i,-1],]), aes(X1, X2), col="blue", size=.5) +
+  geom_point(data= data.frame(umap_euc[    asdNNs[i,-1],]), aes(X1, X2), col="red", size=.5) +
+  geom_point(data= data.frame(umap_euc[  true_ids[i],, drop=FALSE]), aes(X1, X2), col="green", size=1) +
+  ggtitle(paste0(cellinfo$diagnosis[i], " cell (green dot)")) +
+  theme(plot.title = element_text(colour = c("ASD"="red", "Control"="blue")[cellinfo$diagnosis[i]]))
 
 
 
