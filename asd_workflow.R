@@ -121,7 +121,7 @@ cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirec
 
 # merge clusters that are separated by patient heterogeneity:
 tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 6, 8, 1, 10, 20, 2) ~ 5, TRUE ~ tmp_clusters) # excit. Ns
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 6, 8, 1, 10, 20, 2, 16) ~ 5, TRUE ~ tmp_clusters) # excit. Ns
 tmp_clusters <- case_when(tmp_clusters %in% c(11, 15, 19) ~ 11, TRUE ~ tmp_clusters) # astrocytes
 tmp_clusters <- case_when(tmp_clusters %in% c(3, 9, 18) ~ 3, TRUE ~ tmp_clusters) # OPCs
 
