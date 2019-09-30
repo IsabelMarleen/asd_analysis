@@ -329,19 +329,22 @@ dev.off()
 
 
 true_ids <- 1:ncol(counts)
+# for every cell, find nearest control cells:
 controlNNs <- get.knnx(
-  data = pca$x[tmp_clusters == 5  &  cellinfo$diagnosis == "Control",],
-  query =pca$x[tmp_clusters == 5  ,],
+  data = pca$x[cellinfo$diagnosis == "Control",],
+  query =pca$x,
   k = 50
 )
-controlNNs <- matrix(true_ids[tmp_clusters == 5  &  cellinfo$diagnosis == "Control"][controlNNs$nn.index], ncol = 50)
-controlNNs_self <- true_ids[tmp_clusters == 5]
+# convert control-cell-indices to all-cell-indices:
+controlNNs <- matrix(true_ids[cellinfo$diagnosis == "Control"][controlNNs$nn.index], ncol = 50)
+# add index of the cell itself as first column:
+controlNNs <- cbind(true_ids, controlNNs)
 
-i <- sample(1:nrow(controlNNs), 1)
+i <- sample(which(cellinfo$diagnosis != "Control" & tmp_clusters == 5), 1)
 ggplot() + coord_fixed() + 
   geom_point(data= data.frame(umap_euc), aes(X1, X2), col="grey", size=.1) +
-  geom_point(data= data.frame(umap_euc[controlNNs[i,],]), aes(X1, X2), col="black", size=.5) +
-  geom_point(data= data.frame(umap_euc[controlNNs_self[i],, drop=FALSE]), aes(X1, X2), col="red", size=.5) +
+  geom_point(data= data.frame(umap_euc[controlNNs[i,-1],]), aes(X1, X2), col="black", size=.5) +
+  geom_point(data= data.frame(umap_euc[controlNNs[i, 1],, drop=FALSE]), aes(X1, X2), col="red", size=.5) +
   ggtitle(cellinfo$diagnosis[i])
 
 
