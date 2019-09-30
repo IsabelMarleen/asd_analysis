@@ -319,6 +319,46 @@ dev.off()
 
 
 
+
+# smooth LFCs -------------------------------------------------------------
+# For each cell, I look into it's neighborhood and compare ASD and control for
+# a selected gene. Doing this for all cells gives me something like a smoothed
+# logFoldChange that might be interesting to work with (use to cluster genes, etc.).
+
+
+
+
+true_ids <- 1:ncol(counts)
+controlNNs <- get.knnx(
+  data = pca$x[tmp_clusters == 5  &  cellinfo$diagnosis == "Control",],
+  query =pca$x[tmp_clusters == 5  ,],
+  k = 50
+)
+controlNNs <- matrix(true_ids[tmp_clusters == 5  &  cellinfo$diagnosis == "Control"][controlNNs$nn.index], ncol = 50)
+controlNNs_self <- true_ids[tmp_clusters == 5]
+
+i <- sample(1:nrow(controlNNs), 1)
+ggplot() + coord_fixed() + 
+  geom_point(data= data.frame(umap_euc), aes(X1, X2), col="grey", size=.1) +
+  geom_point(data= data.frame(umap_euc[controlNNs[i,],]), aes(X1, X2), col="black", size=.5) +
+  geom_point(data= data.frame(umap_euc[controlNNs_self[i],, drop=FALSE]), aes(X1, X2), col="red", size=.5) +
+  ggtitle(cellinfo$diagnosis[i])
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
 # DESeq -------------------------------------------------------------------
 library(DESeq2)
 library(BiocParallel)
