@@ -31,15 +31,16 @@ rowVars_spm <- function( spm ) {
 }
 
 
-path <- "/home/frauhammer/sds_copy/ASD/"
-cellinfo <- read.delim( file.path( path, "meta.txt" ), stringsAsFactors=FALSE )
-counts <- readMM( file.path( path, "matrix.mtx" ) )
-gene_info <- read.delim( file.path( path, "genes.tsv" ), header=FALSE, as.is=TRUE ) %>%
+path <- "~/sds/sd17l002/p/ASD/"
+cellinfo <- read.delim( file.path( path, "rawMatrix", "meta.txt" ), stringsAsFactors=FALSE )
+counts <- readMM( file.path( path, "rawMatrix", "matrix.mtx" ) )
+# make gene symbols unique (by concatenating ensembleID where necessary):
+gene_info <- read.delim( file.path( path, "rawMatrix", "genes.tsv" ), header=FALSE, as.is=TRUE ) %>%
   mutate(unique = case_when(
   duplicated(V2) | duplicated(V2, fromLast=T) ~ paste(V2, V1, sep="_"),
   TRUE ~ V2))
 rownames(counts) <- gene_info$unique
-colnames(counts) <- readLines( file.path( path, "barcodes.tsv" ) )
+colnames(counts) <- readLines( file.path( path, "rawMatrix", "barcodes.tsv" ) )
 
 
 sampleTable <-
@@ -55,15 +56,13 @@ Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]   and  colSum
 
 
 
-
-
 # Preprocessing -----------------------------------------------------------
 
 # load (or re-execute everything in this section):
-sfs <- colSums(counts)
-norm_counts <- t(t(Ccounts) / colSums(Ccounts))
+sfs <- colSums(Ccounts)
+norm_counts <- t(t(Ccounts) / sfs)
 rownames(norm_counts) <- rownames(Ccounts)
-load(file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
+load(file.path(path, "savepoint", "umap_euc_spread10.RData"))
 
 
 
@@ -79,11 +78,11 @@ points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch="
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
-umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40)
-umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 10, n_threads = 40)
+umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40) # euc: euclidean distance
+
 
 # save(umap_euc,
-#      file = file.path("~", "asd_analysis", "savepoint", "umap_euc_spread10.RData"))
+#      file = file.path(path, "savepoint", "umap_euc_spread10.RData"))
 
 
 
@@ -94,7 +93,7 @@ umap_cos <- uwot::umap( pca$x, metric = "cosine", spread = 10, n_threads = 40)
 
 
 # load (or re-execute everything in this section):
-load(file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
+load(file.path(path, "savepoint", "clusters.RData"))
 
 
 
@@ -151,7 +150,7 @@ p_paper
 
 # 
 # save(list = c("cl_louvain", "tmp_clusters", "nn_cells", "nn_inothercluster"),
-#      file = file.path("~", "asd_analysis", "savepoint", "clusters.RData"))
+#      file = file.path(path, "savepoint", "clusters.RData"))
 
 
 
@@ -161,7 +160,7 @@ p_paper
 # Doublets and ambiguous cells ----------------------------------
 
 # load (or re-execute everything in this section):
-load(file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
+load(file.path(path, "savepoint", "doublets.RData"))
 
 
 
@@ -234,7 +233,7 @@ is_synth <- 1:nrow(ump2) > nrow(pca$x)
 
 # save(list = c("nn_doublets", "nndists_doublets", "cellsA", "cellsB",
 #                 "dblts_perc", "is_synth", "ump2"),
-#      file = file.path("~", "asd_analysis", "savepoint", "doublets.RData"))
+#      file = file.path(path, "savepoint", "doublets.RData"))
 
 
 
