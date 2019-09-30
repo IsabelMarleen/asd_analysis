@@ -62,6 +62,7 @@ Ccounts <- as(counts, "dgCMatrix")      #  fast:   Ccounts[, 1337]   and  colSum
 sfs <- colSums(Ccounts)
 norm_counts <- t(t(Ccounts) / sfs)
 rownames(norm_counts) <- rownames(Ccounts)
+load(file.path(path, "savepoint", "pca_40pcs_scaling_2311genes.RData"))
 load(file.path(path, "savepoint", "umap_euc_spread10.RData"))
 
 
@@ -71,7 +72,7 @@ load(file.path(path, "savepoint", "umap_euc_spread10.RData"))
 poisson_vmr <- mean(1/sfs)
 gene_means <- rowMeans( norm_counts )
 gene_vars <- rowVars_spm( norm_counts )
-cells_expressing <- rowSums( counts != 0 )
+cells_expressing <- colSums( Tcounts != 0 )
 is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  cells_expressing > 100
 plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
 points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
@@ -80,7 +81,8 @@ pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             scale. = TRUE)
 umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40) # euc: euclidean distance
 
-
+# save(pca,
+#      file = file.path(path, "savepoint", "pca_40pcs_scaling_2311genes.RData"))
 # save(umap_euc,
 #      file = file.path(path, "savepoint", "umap_euc_spread10.RData"))
 
@@ -121,12 +123,28 @@ cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirec
 
 # merge clusters that are separated by patient heterogeneity:
 tmp_clusters <- cl_louvain$membership
-tmp_clusters <- case_when(tmp_clusters %in% c(5, 6, 8, 1, 10, 20, 2, 16) ~ 5, TRUE ~ tmp_clusters) # excit. Ns
-tmp_clusters <- case_when(tmp_clusters %in% c(11, 15, 19) ~ 11, TRUE ~ tmp_clusters) # astrocytes
-tmp_clusters <- case_when(tmp_clusters %in% c(3, 9, 18) ~ 3, TRUE ~ tmp_clusters) # OPCs
+tmp_clusters <- case_when(tmp_clusters %in% c(5, 6, 8, 1, 10, 20, 2, 16) ~ 5, # excitatory Neurons
+                          tmp_clusters %in% c(11, 15, 19) ~ 11,  # astrocytes
+                          tmp_clusters %in% c(3, 9, 18) ~ 3,     # OPCs
+                          tmp_clusters %in% c(22, 17) ~ 22,     # endothelial and/or pericytes
+                          TRUE ~ tmp_clusters) 
 
+anno_clusters = c(
+  "3" = "OPC",
+  "4" = "Oligodendrocyte",
+  "5" = "neurons_excit",
+  "7" = "IN_PV",
+  "11"= "Astrocyte",
+  "12"= "IN_SV2C",
+  "13"= "Microglia",
+  "14"= "IN_VIP",
+  "21"= "neurons_NRGN",
+  "22"= "endothelial_and_pericytes",
+  "23"= "IN_SST"
+)
 
-
+celltypes <- factor(anno_clusters[as.character(tmp_clusters)],
+                    levels= anno_clusters[as.character(sort(unique(tmp_clusters)))])
 
 
 # Louvain clusters 
@@ -261,7 +279,7 @@ tmp <- data.frame(umap_euc,
                   diagnosis = cellinfo$diagnosis,
                   clean = dblts_perc < 3/50  & nn_inothercluster < 1,
                   Gene = Tcounts[, "TTF2"] / sfs/mean(1/sfs),
-                  cl = factor(tmp_clusters))
+                  cl = factor(celltypes))
 ggplot() + coord_fixed()+
   geom_point(data=filter(tmp,  clean), aes(X1, X2, col = cl), size=.1) +
   geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1) +
@@ -269,6 +287,8 @@ ggplot() + coord_fixed()+
 
 tmp <- as.matrix(table(sample=cellinfo$sample, clean = dblts_perc < 3/50  & nn_inothercluster < 1))
 data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2])) %>% left_join(sampleTable, by="sample") %>% ggplot(aes(sample, dirtyProportion, col = diagnosis))+geom_point()
+
+
 
 
 
@@ -289,8 +309,6 @@ dds <- DESeqDataSetFromMatrix( pseudobulks,
 dds <- DESeq(dds, 
              parallel=TRUE, BPPARAM=MulticoreParam(20))
 res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
-table(res_df$padj < .1)  
-res_df %>% arrange(padj) %>% head(n=20)
 
 
 
