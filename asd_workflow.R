@@ -33,7 +33,7 @@ rowVars_spm <- function( spm ) {
 }
 
 
-# 
+# define scale_color_sqrt (and functions it requires):
 power_trans <- function(power){
   # returns transformation object that can be used in ggplot's scale_*_continuous
   scales::trans_new(
@@ -42,7 +42,6 @@ power_trans <- function(power){
     inverse = function(x) x^(1/power),
     breaks = function(lims, p) power_breaks(lims, p=power) )
 }
-
 power_breaks <- function(lims, power, n_breaks=5){
   # Return vector of breaks that span the lims range evenly _after_ power transformation:
   lims[1] <- max(0, lims[1]) # non-integer exponents are not defined for negative values
@@ -57,7 +56,6 @@ power_breaks <- function(lims, power, n_breaks=5){
   )
   return(x)
 }
-
 semi_scientific_formatting <- function(x) {
   # takes numeric vector x and returns character vector where extremely large / small
   # numbers are in scientific notation (e.g. 1e-30) while others are untouched:
@@ -65,7 +63,6 @@ semi_scientific_formatting <- function(x) {
     x == 0 ~ as.character(0),
     abs(x) < .01 | abs(x) >= 1000 ~ scales::scientific(x,  digits = 0),
     TRUE ~ as.character(x))}
-
 scale_color_sqrt <- function(...){scale_color_gradientn(
                         colours = rev(rje::cubeHelix(100))[5:100],
                         trans = power_trans(1/2),
