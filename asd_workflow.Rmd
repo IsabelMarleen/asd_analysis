@@ -1,0 +1,400 @@
+---
+title: 'Workflow: ASD patients versus Controls'
+author: "Felix Frauhammer"
+date: "10/1/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages, define functions
+
+
+```{r libload}
+library(DESeq2)
+library(BiocParallel)
+library( tidyverse )
+require( rje )
+library( Matrix )
+library( irlba )
+library( uwot )
+library( FNN )
+library( igraph )
+library( cowplot )
+library( RcppAnnoy ) # spotify's library for finding approximate nearest neighbors
+```
+
+```{r, echo = FALSE}
+# rowVars for sparse matrices:
+colVars_spm <- function( spm ) {
+  stopifnot( is( spm, "dgCMatrix" ) )
+  ans <- sapply( seq.int(spm@Dim[2]), function(j) {
+    mean <- sum( spm@x[ (spm@p[j]+1):spm@p[j+1] ] ) / spm@Dim[1]
+    sum( ( spm@x[ (spm@p[j]+1):spm@p[j+1] ] - mean )^2 ) +
+      mean^2 * ( spm@Dim[1] - ( spm@p[j+1] - spm@p[j] ) ) } ) / ( spm@Dim[1] - 1 )
+  names(ans) <- spm@Dimnames[[2]]
+  ans
+}
+rowVars_spm <- function( spm ) {
+  colVars_spm( t(spm) )
+}
+
+
+# define scale_color_sqrt (and functions it requires):
+power_trans <- function(power){
+  # returns transformation object that can be used in ggplot's scale_*_continuous
+  scales::trans_new(
+    name = "tmp",
+    trans = function(x)   x^(power),
+    inverse = function(x) x^(1/power),
+    breaks = function(lims, p) power_breaks(lims, p=power) )
+}
+power_breaks <- function(lims, power, n_breaks=5){
+  # Return vector of breaks that span the lims range evenly _after_ power transformation:
+  lims[1] <- max(0, lims[1]) # non-integer exponents are not defined for negative values
+  x <- seq(lims[1]^power, lims[2]^(power), length.out = n_breaks)^(1/power)
+  # make human-readable by rounding to the closest integer power of 2. Smallest
+  # and largest ticks are not strictly rounded - instead they are moved within
+  # the range of values, since ggplot would not display them otherwise:
+  x <- case_when(
+    x == max(x) ~ 2^(floor(log2(x))),
+    x == min(x) ~ 2^(ceiling(log2(x))),
+    TRUE ~ (2^(round(log2(x)))) 
+  )
+  return(x)
+}
+semi_scientific_formatting <- function(x) {
+  # takes numeric vector x and returns character vector where extremely large / small
+  # numbers are in scientific notation (e.g. 1e-30) while others are untouched:
+  x <- case_when(
+    x == 0 ~ as.character(0),
+    abs(x) < .01 | abs(x) >= 1000 ~ scales::scientific(x,  digits = 0),
+    TRUE ~ as.character(x))}
+scale_color_sqrt <- function(...){scale_color_gradientn(
+                        colours = rev(rje::cubeHelix(100))[5:100],
+                        trans = power_trans(1/2),
+                        labels = semi_scientific_formatting,
+                        ...)}
+```
+
+## Load data
+
+The matrix with raw UMI counts can be downloaded from [here](http://cells.ucsc.edu/?ds=autism#). This section reads them
+into R.
+
+```{r}
+path <- "~/sds/sd17l002/p/ASD/"
+
+counts <- readMM( file.path( path, "rawMatrix", "matrix.mtx" ) )
+# make gene symbols unique (by concatenating ensembleID where necessary):
+gene_info <- read.delim( file.path( path, "rawMatrix", "genes.tsv" ), header=FALSE, as.is=TRUE ) %>%
+  mutate(unique = case_when(
+  duplicated(V2) | duplicated(V2, fromLast=T) ~ paste(V2, V1, sep="_"),
+  TRUE ~ V2))
+rownames(counts) <- gene_info$unique
+colnames(counts) <- readLines( file.path( path, "rawMatrix", "barcodes.tsv" ) )
+
+# info per cell:
+cellinfo <- read.delim( file.path( path, "rawMatrix", "meta.txt" ), stringsAsFactors=FALSE )
+# info per patient:
+sampleTable <-
+  cellinfo %>% select( sample : RNA.Integrity.Number ) %>% unique
+sampleTable
+```
+
+
+Some operations are faster in column-sparse format than in tripel-sparse.
+We recommend pre-computing these two matrices if time is more important
+than RAM for you:
+```{r tcounts}
+Tcounts <- as(t(counts), "dgCMatrix") #  fast: Tcounts[, "SYN1"]
+Ccounts <- as(counts, "dgCMatrix")    #  fast: Ccounts[, 1337] & colSums(Ccounts)
+```
+
+
+
+## PCA and UMAP
+
+We start with simple size-factor normalization:
+```{r}
+sfs <- colSums(Ccounts)
+norm_counts <- t(t(Ccounts) / sfs)
+rownames(norm_counts) <- rownames(Ccounts)
+```
+
+UMI-based gene expression data has Poisson noise (see for example [the GLM-PCA preprint](https://www.biorxiv.org/content/10.1101/574574v1)). We are only 
+interested in genes that show variation above the expected Poisson variance
+(`is_informative`) and came up with a very simple strategy to find them 
+(we are planning to write up the theoretical details at some point): 
+```{r}
+poisson_vmr <- mean(1/sfs)
+gene_means <- rowMeans( norm_counts )
+gene_vars <- rowVars_spm( norm_counts )
+is_expressed <- colSums( Tcounts != 0 ) > 100
+is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
+plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
+points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
+```
+
+
+
+```{r pca}
+pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
+                            n = 40,
+                            scale. = TRUE)
+umap_euc <- uwot::umap( pca$x, spread = 10, n_threads = 40) # euc: euclidean distance
+```
+
+
+
+
+## Find celltypes with clustering
+
+Clustering scRNAseq data starts with finding each cell's nearest neighbors in PCA space.
+For this we use the
+[RcppAnnoy package](https://github.com/eddelbuettel/rcppannoy), 
+originally developed by Spotify to find music recommendations. It works just as
+well for single-cell data and is faster than 
+[FNN](https://cran.r-project.org/web/packages/FNN/index.html),
+but the code is a bit bulky:
+```{r louvain_findNN}
+# find NN for each cell:
+featureMatrix <- pca$x; k_nn <- 50
+annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
+for( i in 1:nrow(featureMatrix) ) 
+  annoy$addItem( i-1, featureMatrix[i,] )
+annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
+nn_cells <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
+nndists_cells <- sapply( 1:ncol(nn_cells), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn_cells[,j], ] )^2 ) ) )
+rm(featureMatrix, annoy)
+```
+
+We now find clusters with Louvain clustering:
+```{r louvain_graph}
+# has to be sparse, otherwise takes 80 GB of RAM:
+adj <- Matrix(0, nrow = nrow(pca$x), ncol = nrow(pca$x)) 
+for(i in 1:ncol(nn_cells))
+  adj[ cbind(1:nrow(pca$x), nn_cells[, i]) ] <- 1
+for(i in 1:ncol(nn_cells))
+  adj[ cbind(nn_cells[, i], 1:nrow(pca$x)) ] <- 1
+cl_louvain <- cluster_louvain(  graph_from_adjacency_matrix(adj, mode = "undirected") )
+```
+
+To each cluster, we assign a celltype. This is based on gene expression plots
+not shown here, and we merge clusters whose separation is not convincing us.
+```{r louvain_merge}
+celltypes_louv <- cl_louvain$membership
+celltypes_louv <- case_when(
+  # assign celltypes to clusters:
+  celltypes_louv == 4  ~ "Oligodendrocyte",
+  celltypes_louv == 7  ~ "IN_PV",
+  celltypes_louv == 12 ~ "IN_SV2C",
+  celltypes_louv == 13 ~ "Microglia",
+  celltypes_louv == 14 ~ "IN_VIP",
+  celltypes_louv == 21 ~ "neurons_NRGN",
+  celltypes_louv == 23 ~ "IN_SST",
+  # clusters we merge:
+  celltypes_louv %in% c(5, 6, 8, 1, 10, 20, 2, 16) ~ "Neuron_excit",
+  celltypes_louv %in% c(11, 15, 19) ~ "Astrocyte",
+  celltypes_louv %in% c(3, 9, 18) ~ "OPC",
+  celltypes_louv %in% c(22, 17) ~ "Endo_and_pericyte",
+  TRUE ~ "unassigned") %>% factor()
+```
+
+
+```{r louvain_plots, echo=FALSE}
+# Louvain clusters 
+p_louv <- ggplot()+ coord_fixed() + theme(legend.position = "none") +
+  geom_point(data = data.frame(umap_euc, cl=celltypes_louv),
+             aes(X1, X2, col = cl), size = .1) +
+  geom_label(data = data.frame(umap_euc, cl=celltypes_louv) %>%
+               group_by(cl) %>% summarise(X1=mean(X1), X2=mean(X2)), 
+             aes(X1, X2, label = cl))
+
+# clusters from paper
+p_paper <- ggplot()+ coord_fixed()+theme(legend.position = "none") +
+  geom_point(data =data.frame(cell = colnames(counts), umap_euc) %>%
+               left_join(select(cellinfo, cell, cluster), by="cell"),
+             aes(X1, X2, col = cluster), size = .1) +
+  geom_label(data = data.frame(cell = colnames(counts), umap_euc) %>%
+               left_join(select(cellinfo, cell, cluster), by = "cell") %>% 
+               group_by(cluster) %>%
+               summarise(X1=mean(X1), X2=mean(X2)),
+             aes(X1, X2, label = cluster))
+
+plot_grid(
+  p_louv + ggtitle("Louvain clusters"),
+  p_paper+ ggtitle("Clusters from Velmeshev et al., Science 2019")
+)
+```
+
+
+## Doublets and ambiguous cells
+
+
+
+```{r}
+# number of NN from different cluster:
+nn_inothercluster <- colSums(
+  matrix(tmp_clusters[ t(nn_cells) ],
+         ncol = nrow(nn_cells))   != 
+  matrix(rep(tmp_clusters, each = ncol(nn_cells)),
+         ncol = nrow(nn_cells)) )
+```
+
+We simulate doublets *in silico* by the simplest way possible: we randomly
+draw cells from different clusters and pool their UMIs. For each
+cell in our experiment, we ask how many of such **synthetic doublets** it has
+amongst its nearest neighbors and save this values in `dblts_perc` - we will
+use this further below to exclude putative doublet cells from further analysis.
+Credit for this approach goes to published doublet detection tools such as
+[DoubletFinder](https://www.sciencedirect.com/science/article/abs/pii/S2405471219300730)
+and
+[Scrublet](https://www.sciencedirect.com/science/article/abs/pii/S2405471218304745).
+```{r doublet_drawCells}
+cellsA <- sample(1:ncol(counts), 50000)
+cellsB <- rep(NA, 50000)
+smpA <- cellinfo$sample[cellsA]
+clA  <- tmp_clusters[cellsA]
+tmp <- data.frame(smpA, clA) %>% group_by(smpA, clA) %>% tally
+for(i in 1:nrow(tmp)) {
+  is_smp <- cellinfo$sample[cellsA] == tmp$smpA[i]  
+  is_cl  <- tmp_clusters[cellsA] == tmp$clA[i]
+  # sample amongst cells from same sample and different cluster:
+  cellsB[ is_smp & is_cl ] <- base::sample(
+    x = which(cellinfo$sample == tmp$smpA[i]   & !tmp_clusters == tmp$clA[i]),
+    size = tmp$n[i],
+    replace = T) # in case one cluster is larger than all others combined
+}
+
+doublet_raw <- Ccounts[, cellsA] + Ccounts[, cellsB]
+doublet_pcs <- predict(pca,
+                       newdata = sqrt( (t(doublet_raw) / colSums(doublet_raw))[, is_informative] ))
+
+```
+
+We again use RcppAnnoy to find nearest neighbors, this time also for the 
+synthetic doublets on top of the cells:
+```{r}
+featureMatrix <- rbind(pca$x, doublet_pcs); k_nn <- 50
+annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
+for( i in 1:nrow(featureMatrix) ) 
+  annoy$addItem( i-1, featureMatrix[i,] )
+annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
+nn_doublets <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
+nndists_doublets <- sapply( 1:ncol(nn_doublets), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn_doublets[,j], ] )^2 ) ) )
+rm(featureMatrix, annoy)
+
+
+# percentage of synthetic doublets in neighborhood for each cell:
+dblts_perc <- rowMeans( nn_doublets > ncol(counts) )[ 1:ncol(counts) ]
+
+
+
+# Run UMAP with Annoy's output
+ump2 <- uwot::umap( NULL, nn_method = list( idx=nn_doublets, dist=nndists_doublets), 
+                    n_threads=40, spread = 15, verbose=TRUE )
+
+is_synth <- 1:nrow(ump2) > nrow(pca$x)
+```
+
+
+
+```{r, echo=FALSE}
+tmp <- data.frame(umap_euc,
+                  diagnosis = cellinfo$diagnosis,
+                  clean = dblts_perc < 3/50  & nn_inothercluster < 1,
+                  Gene = Tcounts[, "TTF2"] / sfs/mean(1/sfs),
+                  cl = celltypes_louv)
+ggplot() + coord_fixed()+
+  geom_point(data=filter(tmp,  clean), aes(X1, X2, col = cl), size=.1) +
+  geom_point(data=filter(tmp, !clean), aes(X1, X2), col = "black", size=.1) +
+  geom_label(data=group_by(tmp, cl) %>% summarise(X1=mean(X1), X2=mean(X2)), aes(X1, X2, label=cl)) + ggtitle("Black dots show cells with doublets/wrong cluster amongst NN")
+
+tmp <- as.matrix(table(sample=cellinfo$sample, clean = dblts_perc < 3/50  & nn_inothercluster < 1))
+data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2])) %>% left_join(sampleTable, by="sample") %>% ggplot(aes(sample, dirtyProportion, col = diagnosis))+geom_point() + ylab("% of cells with doublets/wrong cluster amongst NN")
+
+```
+
+
+## Compare Autism versus Control
+
+
+```{r}
+sel <- celltypes == "neurons_excit"  & dblts_perc < 3/50  & nn_inothercluster < 1
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+  mutate(individual = factor(individual),
+         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+         region    = factor(region))
+rownames(coldat) <- coldat$sample
+
+dds <- DESeq2::DESeqDataSetFromMatrix( pseudobulks,
+                               coldat[colnames(pseudobulks), ],
+                               design = ~ sex + region + age + diagnosis )
+# For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
+# DESeq's LTR for this (see mail to Simon at mid-September 2019).
+dds <- DESeq2::DESeq(dds, 
+             parallel=TRUE, BPPARAM=BiocParallel::MulticoreParam(20))
+res_df <- DESeq2::results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+
+
+
+data.frame(umap_euc, Gene = Tcounts[, "ZNF770"], sfs=sfs, diagnosis=cellinfo$diagnosis) %>%
+  ggplot(aes(X1, X2, col=Gene/sfs/mean(1/sfs)))+geom_point(size=.1) +
+  scale_color_sqrt(name="ZNF770") +
+  facet_wrap(~ diagnosis) + coord_fixed()
+
+```
+
+
+
+
+
+
+
+
+## savepoint
+
+```{r}
+# save(pca,
+#      file = file.path(path, "savepoint", "pca_40pcs_scaling_2311genes.RData"))
+# save(umap_euc,
+#      file = file.path(path, "savepoint", "umap_euc_spread10.RData"))
+
+
+# save(list = c("cl_louvain", "tmp_clusters", "celltypes", "anno_clusters",
+#               "nn_cells", "nn_inothercluster"),
+#      file = file.path(path, "savepoint", "clusters.RData"))
+
+# save(list = c("nn_doublets", "nndists_doublets", "cellsA", "cellsB",
+#                 "dblts_perc", "is_synth", "ump2"),
+#      file = file.path(path, "savepoint", "doublets.RData"))
+
+
+load(file.path(path, "savepoint", "pca_40pcs_scaling_2311genes.RData"))
+load(file.path(path, "savepoint", "umap_euc_spread10.RData"))
+load(file.path(path, "savepoint", "clusters.RData"))
+load(file.path(path, "savepoint", "doublets.RData"))
+```
+
+
+
+
+
+
+
+## Including Plots
+
+links: <http://rmarkdown.rstudio.com>.
+this is **bold**.
+Embedded plot, code is hidden:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+
+
