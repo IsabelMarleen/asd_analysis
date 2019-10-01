@@ -210,8 +210,9 @@ p_paper <- ggplot()+ coord_fixed()+
              aes(X1, X2, label = cluster))
 p_paper
 
-# 
-# save(list = c("cl_louvain", "tmp_clusters", "nn_cells", "nn_inothercluster"),
+
+# save(list = c("cl_louvain", "tmp_clusters", "celltypes", "anno_clusters",
+#               "nn_cells", "nn_inothercluster"),
 #      file = file.path(path, "savepoint", "clusters.RData"))
 
 
@@ -345,14 +346,14 @@ coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>%
          region    = factor(region))
 rownames(coldat) <- coldat$sample
 
-dds <- DESeqDataSetFromMatrix( pseudobulks,
+dds <- DESeq2::DESeqDataSetFromMatrix( pseudobulks,
                                coldat[colnames(pseudobulks), ],
                                design = ~ sex + region + age + diagnosis )
 # For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
 # DESeq's LTR for this (see mail to Simon at mid-September 2019).
-dds <- DESeq(dds, 
-             parallel=TRUE, BPPARAM=MulticoreParam(20))
-res_df <- results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+dds <- DESeq2::DESeq(dds, 
+             parallel=TRUE, BPPARAM=BiocParallel::MulticoreParam(20))
+res_df <- DESeq2::results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
 
 
 
