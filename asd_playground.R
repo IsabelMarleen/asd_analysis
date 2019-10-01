@@ -360,9 +360,24 @@ ggplot() + coord_fixed() +
 
 
 
+i <- 28247
 
+sfs[controlNNs[i,]]
+Tcounts[controlNNs[i,], "ZNF770"]
 
-  
+rbind(
+  # cell itself
+  data.frame(diagnosis = cellinfo$diagnosis[i], sfs=sfs[i], umi = Tcounts[i, "ZNF770"]),
+  # neighbors:
+  data.frame(
+    diagnosis = rep(c("Control", "ASD"), each=50),
+    sfs = c(sfs[controlNNs[i,-1]], sfs[asdNNs[i,-1]]),
+    umi = c(Tcounts[controlNNs[i,-1], "ZNF770"], Tcounts[asdNNs[i,-1], "ZNF770"]))
+  ) %>%
+  ggplot(aes(sfs, umi, col = diagnosis))+geom_point()
+ 
+
+ 
 
 
 
