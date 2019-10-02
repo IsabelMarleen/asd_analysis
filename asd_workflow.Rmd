@@ -238,9 +238,9 @@ plot_grid(
 ```{r}
 # number of NN from different cluster:
 nn_inothercluster <- colSums(
-  matrix(tmp_clusters[ t(nn_cells) ],
+  matrix(celltypes_louv[ t(nn_cells) ],
          ncol = nrow(nn_cells))   != 
-  matrix(rep(tmp_clusters, each = ncol(nn_cells)),
+  matrix(rep(celltypes_louv, each = ncol(nn_cells)),
          ncol = nrow(nn_cells)) )
 ```
 
@@ -257,14 +257,14 @@ and
 cellsA <- sample(1:ncol(counts), 50000)
 cellsB <- rep(NA, 50000)
 smpA <- cellinfo$sample[cellsA]
-clA  <- tmp_clusters[cellsA]
+clA  <- celltypes_louv[cellsA]
 tmp <- data.frame(smpA, clA) %>% group_by(smpA, clA) %>% tally
 for(i in 1:nrow(tmp)) {
   is_smp <- cellinfo$sample[cellsA] == tmp$smpA[i]  
-  is_cl  <- tmp_clusters[cellsA] == tmp$clA[i]
+  is_cl  <- celltypes_louv[cellsA] == tmp$clA[i]
   # sample amongst cells from same sample and different cluster:
   cellsB[ is_smp & is_cl ] <- base::sample(
-    x = which(cellinfo$sample == tmp$smpA[i]   & !tmp_clusters == tmp$clA[i]),
+    x = which(cellinfo$sample == tmp$smpA[i]   & !celltypes_louv== tmp$clA[i]),
     size = tmp$n[i],
     replace = T) # in case one cluster is larger than all others combined
 }
@@ -323,7 +323,7 @@ data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2
 
 
 ```{r}
-sel <- celltypes == "neurons_excit"  & dblts_perc < 3/50  & nn_inothercluster < 1
+sel <- celltypes_louv == "Neuron_excit"  & dblts_perc < 3/50  & nn_inothercluster < 1
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
@@ -363,12 +363,11 @@ data.frame(umap_euc, Gene = Tcounts[, "ZNF770"], sfs=sfs, diagnosis=cellinfo$dia
 #      file = file.path(path, "savepoint", "pca_40pcs_scaling_2311genes.RData"))
 # save(umap_euc,
 #      file = file.path(path, "savepoint", "umap_euc_spread10.RData"))
-
-
-# save(list = c("cl_louvain", "tmp_clusters", "celltypes", "anno_clusters",
-#               "nn_cells", "nn_inothercluster"),
+# 
+# 
+# save(list = c("cl_louvain", "celltypes_louv", "nn_cells", "nn_inothercluster"),
 #      file = file.path(path, "savepoint", "clusters.RData"))
-
+# 
 # save(list = c("nn_doublets", "nndists_doublets", "cellsA", "cellsB",
 #                 "dblts_perc", "is_synth", "ump2"),
 #      file = file.path(path, "savepoint", "doublets.RData"))
@@ -384,17 +383,6 @@ load(file.path(path, "savepoint", "doublets.RData"))
 
 
 
-
-
-## Including Plots
-
-links: <http://rmarkdown.rstudio.com>.
-this is **bold**.
-Embedded plot, code is hidden:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
 
 
 
