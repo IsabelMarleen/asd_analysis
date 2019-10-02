@@ -254,22 +254,15 @@ Credit for this approach goes to published doublet detection tools such as
 and
 [Scrublet](https://www.sciencedirect.com/science/article/abs/pii/S2405471218304745).
 ```{r doublet_drawCells}
-cellsA <- sample(1:ncol(counts), 50000)
-cellsB <- rep(NA, 50000)
-smpA <- cellinfo$sample[cellsA]
-clA  <- celltypes_louv[cellsA]
-tmp <- data.frame(smpA, clA) %>% group_by(smpA, clA) %>% tally
-for(i in 1:nrow(tmp)) {
-  is_smp <- cellinfo$sample[cellsA] == tmp$smpA[i]  
-  is_cl  <- celltypes_louv[cellsA] == tmp$clA[i]
-  # sample amongst cells from same sample and different cluster:
-  cellsB[ is_smp & is_cl ] <- base::sample(
-    x = which(cellinfo$sample == tmp$smpA[i]   & !celltypes_louv== tmp$clA[i]),
-    size = tmp$n[i],
-    replace = T) # in case one cluster is larger than all others combined
-}
+# for each sample, we draw random pairs of cells (their ids go to columns of a matrix):
+doublet_ids <- sapply(unique(cellinfo$sample), function(smp) {
+  is_smp <- cellinfo$sample == smp
+  matrix(sample(x = which(is_smp),
+                size = 2*floor(sum(is_smp)/2)),  # 2*floor(x/2) makes x even
+         ncol = 2)
+}) %>% do.call(rbind, .)
 
-doublet_raw <- Ccounts[, cellsA] + Ccounts[, cellsB]
+doublet_raw <- Ccounts[, doublet_ids[,1]] + Ccounts[, doublet_ids[,2]]
 doublet_pcs <- predict(pca,
                        newdata = sqrt( (t(doublet_raw) / colSums(doublet_raw))[, is_informative] ))
 
