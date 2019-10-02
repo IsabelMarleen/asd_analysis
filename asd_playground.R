@@ -313,6 +313,46 @@ dev.off()
 
 
 
+# sleepwalk: markers -----------------------------------------------------------------
+# does not work in RStudio server yet.
+library(sleepwalk)
+
+getHighGenes <- function(marked){
+  
+  # If no genes are marked, clear output, do nothing else
+  if( length(marked) == 0 ) {
+    return( "" )
+  }
+  
+  #for each gene we calculate mean and standart deviation in marked cells and all other cells
+  df <- data.frame(
+    meanMarked   =  apply( data$expr[ marked, ], 2, mean ),
+    sdMarked     =  apply( data$expr[ marked, ], 2, sd ),
+    meanUnmarked =  apply( data$expr[ -marked, ], 2, mean ),
+    sdUnmarked   =  apply( data$expr[ -marked, ], 2, sd )
+  )
+  #separation score
+  df$sepScore <- ( df$meanMarked - df$meanUnmarked ) / pmax( df$sdMarked + df$sdUnmarked, 0.002 )
+  
+  # round to two decimal places
+  df <- round(df * 100)/100
+  
+  #print top genes  
+  print(head( df[ order( df$sepScore, decreasing=TRUE ), ], 15 ))
+  
+  #make a plot of gene expression
+  topGene <- rownames(df)[which.max(df$sepScore)]
+  pl <- ggplot() + geom_point(aes(x = data$um[, 1], y = data$um[, 2], colour = data$expr[, topGene])) +
+    labs(colour = topGene) + scale_color_gradient(low = "Yellow", high = "Red")
+  
+  print(pl)
+}
+
+sleepwalk(umap_euc, pca$x[, 1:20], pointSize = 2.5, on_selection = getHighGenes)
+
+
+
+
 
 
 
