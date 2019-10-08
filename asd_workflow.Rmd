@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Load packages, define functions
 
 
-```{r libload}
+```{r libload, message=FALSE, warning=FALSE}
 library(DESeq2)
 library(BiocParallel)
 library( tidyverse )
