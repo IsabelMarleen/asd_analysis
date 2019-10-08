@@ -312,6 +312,67 @@ data.frame(sample = rownames(tmp), dirtyProportion = tmp[,1] / (tmp[,1] + tmp[,2
 ```
 
 
+
+
+
+
+## Find celltypes with smoothing
+
+```{r}
+tricube_fromNN1 <- function(x, halfwidth=1) {
+  # tricube kernel function with sef: self equals first neighbor.
+  #
+  # formula adapted from (wikipedia)[https://en.wikipedia.org/wiki/Kernel_(statistics)],
+  # and expanded to contain `halfwidth`.
+  # distance to oneself is 0 so we mask it:
+  self_id <- which.min(x)
+  x[self_id] <- NA
+  nn_dist <- min(x, na.rm = TRUE) # distance to first nearest neighbor
+  x <- x - nn_dist
+  halfwidth <- halfwidth - nn_dist
+  tricube <- 70/81/halfwidth * (1 - abs(x/halfwidth)^3)^3
+  # outside of kernel support (-halfwidth, +halfwidth), tricube is defined as 0:
+  tricube[ abs(x) > halfwidth ] <- 0
+  tricube[self_id] <- tricube[which.max(tricube)]
+  return(tricube)
+}
+
+
+kernel_weights <- apply(nndists_cells,
+                        1,
+                        function(d) tricube_fromNN1(d, max(d)))
+```
+
+
+```{r}
+knn_smooth <- function(g = "SYT1"){
+# knn-smooth a gene with tricube weights
+ norm_umis <- matrix(Ccounts[g, c(nn_cells)] / sfs[c(nn_cells)],
+                     ncol = ncol(nn_cells))
+ knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) / colSums(kernel_weights)
+}
+```
+
+
+```{r}
+make_p <- function(df) {
+  ggplot(data=df, aes(X1, X2, col = Gene))+geom_point(size=.1)+coord_fixed() +
+  scale_color_gradientn(colours = rev(rje::cubeHelix(100))[5:100], trans = "sqrt")
+}
+
+
+plot_grid(
+    data.frame(umap_euc, Gene = Tcounts[, "SYT1"]/sfs) %>% make_p,
+    data.frame(umap_euc, Gene = knn_smooth("SYT1")) %>% make_p
+)
+```
+
+
+
+
+
+
+
 ## Compare Autism versus Control
 
 
