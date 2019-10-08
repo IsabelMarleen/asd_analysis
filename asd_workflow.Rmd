@@ -358,7 +358,8 @@ data.frame(umap_euc, Gene = Tcounts[, "ZNF770"], sfs=sfs, diagnosis=cellinfo$dia
 #      file = file.path(path, "savepoint", "umap_euc_spread10.RData"))
 # 
 # 
-# save(list = c("cl_louvain", "celltypes_louv", "nn_cells", "nn_inothercluster"),
+# save(list = c("cl_louvain", "celltypes_louv", "nn_cells", "nndists_cells",
+#               "nn_inothercluster"),
 #      file = file.path(path, "savepoint", "clusters.RData"))
 # 
 # save(list = c("nn_doublets", "nndists_doublets", "cellsA", "cellsB",
