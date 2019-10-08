@@ -355,7 +355,7 @@ knn_smooth <- function(g = "SYT1"){
 
 
 ```{r}
-make_p <- function(df) {
+make_p <- function(df) {  # custom function to save some typing - pure laziness
   ggplot(data=df, aes(X1, X2, col = Gene))+geom_point(size=.1)+coord_fixed() +
   scale_color_gradientn(colours = rev(rje::cubeHelix(100))[5:100], trans = "sqrt")
 }
@@ -367,6 +367,20 @@ plot_grid(
 )
 ```
 
+```{r}
+syt1 <- knn_smooth("SYT1")
+cux2 <- knn_smooth("CUX2")
+rorb <- knn_smooth("RORB")
+
+# brain-map.org data (7284 single nuclei sorted by cortical layers):
+#      Margot works on it.
+
+
+data.frame(umap_euc, syt1, cux2, rorb) %>% 
+  ggplot() + geom_point(aes(syt1, cux2, col = cux2 > .00025), size=.1) + coord_fixed() + 
+  scale_x_continuous(trans = "sqrt") +
+  scale_y_continuous(trans = "sqrt")
+```
 
 
 
