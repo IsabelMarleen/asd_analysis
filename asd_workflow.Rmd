@@ -351,37 +351,169 @@ knn_smooth <- function(g = "SYT1"){
                      ncol = ncol(nn_cells))
  knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) / colSums(kernel_weights)
 }
-```
 
 
-```{r}
 make_p <- function(df) {  # custom function to save some typing - pure laziness
   ggplot(data=df, aes(X1, X2, col = Gene))+geom_point(size=.1)+coord_fixed() +
   scale_color_gradientn(colours = rev(rje::cubeHelix(100))[5:100], trans = "sqrt")
 }
-
-
-plot_grid(
-    data.frame(umap_euc, Gene = Tcounts[, "SYT1"]/sfs) %>% make_p,
-    data.frame(umap_euc, Gene = knn_smooth("SYT1")) %>% make_p
-)
 ```
+
+
+
 
 ```{r}
 syt1 <- knn_smooth("SYT1")
 cux2 <- knn_smooth("CUX2")
+DPP10<- knn_smooth("DPP10") # anticorrelated with CUX2, 
 rorb <- knn_smooth("RORB")
+```
 
-# brain-map.org data (7284 single nuclei sorted by cortical layers):
-#      Margot works on it.
+Smoothing looks convincing:
+```{r}
+plot_grid(
+    data.frame(umap_euc, Gene = Tcounts[, "SYT1"]/sfs) %>% make_p,
+    data.frame(umap_euc, Gene = syt1) %>% make_p
+)
+```
 
 
+
+
+### CUX2 cells
+
+
+Cells can be separated in principle by smoothed cux2 expression:
+```{r}
 data.frame(umap_euc, syt1, cux2, rorb) %>% 
   ggplot() + geom_point(aes(syt1, cux2, col = cux2 > .00025), size=.1) + coord_fixed() + 
   scale_x_continuous(trans = "sqrt") +
   scale_y_continuous(trans = "sqrt")
 ```
+Patient heterogeneity in CUX2:
+```{r}
+data.frame(cellinfo, cux2, celltypes_louv) %>%
+  mutate(tmp = case_when(
+    celltypes_louv %in% c("Neuron_excit", "neurons_NRGN") ~ as.character(celltypes_louv),
+    TRUE ~ "other"
+  ) ) %>% 
+  ggplot(aes(factor(sample), cux2, col = tmp))+geom_jitter(size=.1) + 
+  scale_y_continuous(trans=power_trans(1/2)) +
+  theme(axis.text.x  =  element_text(angle = 90))
 
+
+
+
+data.frame(cellinfo, cux2, celltypes_louv) %>%
+  mutate(tmp = case_when(
+    celltypes_louv %in% c("Neuron_excit", "neurons_NRGN") ~ as.character(celltypes_louv),
+    TRUE ~ "other"
+  ) ) %>% 
+  filter(celltypes_louv == "Neuron_excit") %>%
+  ggplot(aes(cux2, col = factor(sample)))+geom_density()
+  scale_x_continuous(trans=power_trans(1/2)) +
+  theme(axis.text.x  =  element_text(angle = 90))
+```
+
+
+
+What correlates with cux2? 
+```{r}
+sel <- celltypes_louv == "Neuron_excit"   &   
+  dblts_perc < 3/50  & nn_inothercluster < 1
+poisson_vmr <- mean(1/sfs[sel])
+gene_means <- rowMeans( norm_counts[, sel] )
+gene_vars <- rowVars_spm( norm_counts[,sel] )
+is_expressed <- colSums( Tcounts[sel,] != 0 ) > 200
+is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
+plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
+points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
+
+# compute patient-ignorant (across all cells)
+gene_cors <- cor(cux2[sel], as.matrix(t(norm_counts[is_informative,sel])))
+gene_cors <- gene_cors[1,] # from matrix to vector
+head(sort(abs(gene_cors), decreasing = T), n=20)
+```
+
+```{r}
+plot_grid(
+  data.frame(umap_euc, Gene = Tcounts[, "CUX2"]/sfs) %>% make_p,
+  data.frame(umap_euc, Gene = Tcounts[, "DPP10"]/sfs) %>% make_p
+)
+```
+
+ASD vs control: do gene correlations with CUX2 change with disease?
+```{r}
+normcounts_for_cor <- as.matrix(t(norm_counts[is_informative, ]))
+cux2_for_cor <- norm_counts["CUX2", ]
+cors_per_sample <- lapply(unique(cellinfo$sample), function(smp){
+  smp_sel <- cellinfo$sample == smp  &  sel
+  print(paste0(smp, ":  ", sum(smp_sel)))
+  drop(cor(cux2_for_cor[smp_sel], normcounts_for_cor[smp_sel,]))
+}) %>% do.call(cbind, .)
+colnames(cors_per_sample) <- unique(cellinfo$sample)
+
+cors_factor <- data.frame(sample = colnames(cors_per_sample), stringsAsFactors = F) %>%
+  left_join(sampleTable, by = "sample") %>% pull(diagnosis) %>% factor
+
+library(genefilter)
+res <- rowttests(cors_per_sample, cors_factor, tstatOnly = FALSE) 
+res %>% rownames_to_column("Gene") %>% filter(p.value < .1) %>% arrange(desc(dm)) %>% head(n=20)
+```
+
+
+```{r}
+data.frame(cors_factor,t(cors_per_sample)) %>%
+  ggplot(aes(cors_factor, PBX1))+geom_point()
+```
+
+
+
+
+### Excitatory Neurons, Oligodendrocytes, ...
+Celltypes:
+```{r}
+plot_grid(
+  p_louv + ggtitle("Louvain clusters"),
+  p_paper+ ggtitle("Clusters from Velmeshev et al., Science 2019")
+)
+```
+
+
+Excitatory Neurons
+```{r}
+SLC17A7 <- knn_smooth("SLC17A7") # glial cells + endo
+data.frame(umap_euc, Gene = Tcounts[, "SLC17A7"]/sfs) %>% make_p
+data.frame(umap_euc, Gene = SLC17A7) %>% make_p
+```
+
+
+
+Oligodendrocytes
+```{r}
+PLP1 <- knn_smooth("PLP1")
+data.frame(umap_euc, Gene = Tcounts[, "PLP1"]/sfs) %>% make_p
+data.frame(umap_euc, Gene = PLP1) %>% make_p
+```
+
+
+
+Glial cells + endo according to paper, but I think it's astrocytes only
+(in Science paper, microglia are marked nicely... could that be overplotting?!)
+```{r}
+SLC1A2 <- knn_smooth("SLC1A2")
+
+data.frame(umap_euc, Gene = Tcounts[, "SLC1A2"]/sfs) %>% make_p
+data.frame(umap_euc, Gene = SLC1A2/mean(1/sfs)) %>% make_p
+```
+
+
+
+
+Layer 2/3 (Margot and Simon)
+```{r}
+data.frame(umap_euc, Gene = Tcounts[, "CARM1P1"]/sfs) %>% make_p
+```
 
 
 
