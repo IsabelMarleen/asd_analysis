@@ -525,13 +525,28 @@ layermarkers <- list(l56_lt_l23=l56_lt_l23,
  l1_lt_l56=l1_lt_l56)
 
 layermarkers <- unlist(layermarkers)[ unlist(layermarkers) %in% rownames(norm_counts)]
+
+
+poisson_vmr <- mean(1/sfs[celltypes_louv == "Neuron_excit"])
+gene_means <- rowMeans( norm_counts[, celltypes_louv == "Neuron_excit"] )
+gene_vars <- rowVars_spm( norm_counts[,celltypes_louv == "Neuron_excit"] )
+is_expressed <- colSums( Tcounts[celltypes_louv == "Neuron_excit",] != 0 ) > 100
+is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
+plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
+points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
+
+
 layermarkers <- layermarkers[ layermarkers %in% rownames(norm_counts)[is_informative] ]
+# duplicated markers can exist if one gene is a DEG in two different contrasts:
+layermarkers <- unique(layermarkers)
 
 cors_layerm <- cor(as.matrix(t(sqrt(
   norm_counts[layermarkers,
               celltypes_louv == "Neuron_excit" &
                  dblts_perc < 3/50  & nn_inothercluster < 1]))))
 cors_layerm[cors_layerm > .9] <- NA
+
+
 
 library(pheatmap)
 library(RColorBrewer)
@@ -545,7 +560,7 @@ pheatmap(cors_layerm,
 "SLC38A11"
 "COBLL1"
 
-unlist(layermarkers)[unlist(layermarkers) %in% colnames(cors_layerm)]
+layermarkers
 ```
 
 
