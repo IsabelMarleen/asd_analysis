@@ -696,6 +696,38 @@ lc_input(type = "range",
 
 ```
 
+Manually I click through some genes and note down bimodal ones here:
+```{r}
+bimodal_genes <- c(
+  "KIAA1217",
+  "HTR2C",
+  "ZNF385D",
+  "TSHZ2",
+  "HS3ST4",  # trimodal?
+  "DLC1",
+  "POU6F2",  # ill-separated peaks
+  "CA10",  # ill-separated peaks
+  "TMTC2",  # ill-separated peaks
+  "CACNB2",  # ill-separated peaks
+  "CTC-535M15.2",
+  "Meis2",  # VMR is not spectacular but bimodality well visible
+  "GRIN1",
+  "CNTNAP5",
+  "CPNE4"
+  
+)
+
+not_bimodal <- c(
+  "GPC5",
+  "ENC1",
+  "PTPRT",
+  "SYN2",
+  "STMN1",
+  "INO80D",
+  "MCTP1"  # trimodal, in my opinion
+  
+)
+```
 
 
 
