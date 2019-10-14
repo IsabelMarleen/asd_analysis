@@ -637,7 +637,7 @@ knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) /
 
 
 
-data.frame(cell=colnames(counts), umap_euc) %>% left_join(data.frame(cell = colnames(counts)[is_cl], Gene = knn_smoothed)) %>% ggplot(aes(X1, X2, col = Gene))+geom_point(size=.1)
+data.frame(cell=colnames(counts), umap_euc) %>% left_join(data.frame(cell = colnames(counts)[is_cl], Gene = knn_smoothed)) %>% ggplot(aes(X1, X2, col = Gene))+geom_point(size=.1) + scale_color_sqrt()
 ```
 
 linked chart:
