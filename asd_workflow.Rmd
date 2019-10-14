@@ -419,7 +419,7 @@ data.frame(cellinfo, cux2, celltypes_louv) %>%
 
 What correlates with cux2? 
 ```{r}
-sel <- celltypes_louv == "Neuron_excit"   &   
+sel <- celltypes_louv == "Neuron_eblxcit"   &   
   dblts_perc < 3/50  & nn_inothercluster < 1
 poisson_vmr <- mean(1/sfs[sel])
 gene_means <- rowMeans( norm_counts[, sel] )
@@ -515,6 +515,102 @@ Layer 2/3 (Margot and Simon)
 data.frame(umap_euc, Gene = Tcounts[, "CARM1P1"]/sfs) %>% make_p
 ```
 
+
+
+
+
+
+
+
+## Genes of interest
+
+
+Smoothing is useful for gene-based questions, so let's ask some.
+
+
+Question: Gene X is variable amongst excit_neurons: can we learn more about it?
+
+```{r hvgs_excitNeurons}
+sel <- celltypes_louv == "Neuron_excit"   &   
+  dblts_perc < 3/50  & nn_inothercluster < 1
+poisson_vmr <- mean(1/sfs[sel])
+gene_means <- rowMeans( norm_counts[, sel] )
+gene_vars <- rowVars_spm( norm_counts[,sel] )
+is_expressed <- colSums( Tcounts[sel,] != 0 ) > 200
+is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
+plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
+points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
+
+
+# PCA on excit Neurons:
+pc_excit <- irlba::prcomp_irlba(sqrt(t(norm_counts[is_informative, sel])), n = 20, scale. = TRUE)
+
+rots <- pc_excit$rotation
+rownames(rots) <- rownames(norm_counts)[is_informative]
+
+
+library(mgcv)
+total_res <- sapply(1:20, function(i){
+  print(i)
+ fit <- gam(gene ~ pc, offset = log(sfs),
+    data = data.frame(gene = Tcounts[sel, "RMST"],
+                      sfs=sfs[sel],
+                      pc = pc_excit$x[,i]))
+ sum(abs(fit$residuals)) 
+})
+
+
+i <- 5
+fit <- gam(gene ~ s(pc),# offset = log(sfs),
+    data = data.frame(gene = Tcounts[sel, "RMST"],
+                      sfs=sfs[sel],
+                      pc = pc_excit$x[,i]))
+
+data.frame(gene = Tcounts[sel, "RMST"],
+           sfs=sfs[sel],
+           pc = pc_excit$x[,i],
+           fitted = fit$fitted.values,
+           offset = fit$offset,
+           residuals = fit$residuals) %>%
+  ggplot() +
+  geom_jitter(aes(pc, gene, col = residuals), size=.1) +
+  geom_point(aes(pc, fitted#/offset
+                 ), col = "red")
+```
+
+```{r}
+# top VMRs in cluster "Neurons_excit", filtered out very highly expressed genes:
+data.frame(vmr = gene_vars / gene_means, mean=gene_means, is_informative) %>%
+  rownames_to_column("Gene") %>% filter(mean < 1e-4, is.finite(vmr), vmr > 5e-4,
+                                        is_informative) %>%
+  arrange(desc(mean))  %>% head(n=20)
+          
+```
+
+Check out individual genes:
+```{r}
+RMST <- knn_smooth("RMST")
+
+# umap expression:
+data.frame(umap_euc, Gene = Tcounts[, "RMST"]/sfs/mean(1/sfs)) %>% make_p
+data.frame(umap_euc, Gene = RMST/mean(1/sfs)) %>% make_p
+
+# jitter-per-patient:
+data.frame(cellinfo, Gene = RMST, celltypes_louv) %>%
+  mutate(tmp = case_when(
+    celltypes_louv %in% c("Neuron_excit", "neurons_NRGN") ~ as.character(celltypes_louv),
+    TRUE ~ "other"
+  ) ) %>% 
+  ggplot(aes(factor(sample), Gene, col = tmp))+geom_jitter(size=.1) + 
+  scale_y_continuous(trans=power_trans(1/2)) +
+  theme(axis.text.x  =  element_text(angle = 90))
+
+data.frame(cellinfo, RMST, celltypes_louv) %>%
+  filter(celltypes_louv == "Neuron_excit") %>%
+  ggplot(aes(RMST, col = factor(diagnosis)))+geom_density() +
+  scale_x_continuous(trans=power_trans(1/2), labels = semi_scientific_formatting) +
+  theme(axis.text.x  =  element_text(angle = 90)) + facet_wrap(~individual)
+```
 
 
 
