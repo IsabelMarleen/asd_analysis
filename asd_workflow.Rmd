@@ -592,8 +592,109 @@ load(file.path(path, "savepoint", "doublets.RData"))
 
 
 
+## Linked charts
+
+HVGs for excitatory Neurons:
+```{r hvg_excit}
+is_cl  <- celltypes_louv == "Neuron_excit"   &   
+  dblts_perc < 3/50  & nn_inothercluster < 1
+# 
+
+# counts <- counts[, is_cl]  # to make it fit into laptop memory
+counts <- as(counts, "dgCMatrix")
+sfs <- colSums(counts)
+norm_counts <- t(t(counts[, is_cl]) / sfs[is_cl])
+rownames(norm_counts) <- rownames(counts)
+
+poisson_vmr <- mean(1/sfs[is_cl])
+gene_means <- rowMeans( norm_counts )
+gene_vars <- rowVars_spm( norm_counts )
+is_expressed <- rowSums( norm_counts != 0 ) > 100
+is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
+plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
+points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
+```
 
 
+```{r rlc}
+library(rlc)
+
+
+nn_cells_cl <- nn_cells[is_cl, ]
+kernel_weights <- apply(nndists_cells[is_cl, ],
+                        1,
+                        function(d) tricube_fromNN1(d, max(d)))
+
+
+# knn-smooth a gene with tricube weights
+g <- "CUX2"
+norm_umis <- matrix(counts[g, c(nn_cells_cl)] / sfs[c(nn_cells_cl)],
+                    ncol = ncol(nn_cells_cl))
+knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) /
+                colSums(kernel_weights)
+
+
+
+
+
+data.frame(cell=colnames(counts), umap_euc) %>% left_join(data.frame(cell = colnames(counts)[is_cl], Gene = knn_smoothed)) %>% ggplot(aes(X1, X2, col = Gene))+geom_point(size=.1)
+```
+
+linked chart:
+```{r}
+inverse_gamma <- 1
+means <- log10(gene_means[is_expressed])
+vars  <- log10( (gene_vars/gene_means)[is_expressed] )
+genes <- names(means)
+
+smooth_list <- lapply(genes, function(x) NULL)
+names(smooth_list) <- genes
+
+knn_smooth <- function(g){
+  if(is.null(smooth_list[[g]])){
+   norm_umis <- matrix(counts[g, c(nn_cells_cl)] / sfs[c(nn_cells_cl)],
+                      ncol = ncol(nn_cells_cl))
+   knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) /
+                   colSums(kernel_weights)   
+   smooth_list[[g]] <<- knn_smoothed}
+  return(smooth_list[[g]])
+}
+gene <- "CUX2"
+
+openPage()
+lc_scatter(dat(size = 2,
+               title = gene,
+               on_click = function(value) {
+                 gene <<- genes[value]
+                 updateCharts(c("vmr", "A1"),
+                              updateOnly = c("Title", ""))
+               }),
+           x = means,
+           y = vars,
+           width = 400, height = 400,
+           "vmr"
+)
+
+lc_hist(dat(value = knn_smooth(gene)^(1/inverse_gamma),
+            title = gene,
+            nbins = 30), "A1")
+
+
+lc_input(type = "range",
+         label = c("Inverse Power (1/gamma)"),
+         width = 300,
+         value = c(1),
+         min = c(1),
+         max = c(10),
+         step = c(1),
+         on_change = function(value) {
+           inverse_gamma <<- value[1]
+           updateCharts("A1")
+
+         })
+
+
+```
 
 
 
