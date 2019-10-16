@@ -87,6 +87,7 @@ into R.
 ```{r}
 path <- "~/sds/sd17l002/p/ASD/"
 
+
 counts <- readMM( file.path( path, "rawMatrix", "matrix.mtx" ) )
 # make gene symbols unique (by concatenating ensembleID where necessary):
 gene_info <- read.delim( file.path( path, "rawMatrix", "genes.tsv" ), header=FALSE, as.is=TRUE ) %>%
@@ -96,8 +97,11 @@ gene_info <- read.delim( file.path( path, "rawMatrix", "genes.tsv" ), header=FAL
 rownames(counts) <- gene_info$unique
 colnames(counts) <- readLines( file.path( path, "rawMatrix", "barcodes.tsv" ) )
 
-# info per cell:
-cellinfo <- read.delim( file.path( path, "rawMatrix", "meta.txt" ), stringsAsFactors=FALSE )
+# info per cell (append tSNE we downloaded from cells.ucsc.edu as well):
+cellinfo <- read.delim( file.path( path, "rawMatrix", "meta.txt" ), stringsAsFactors=FALSE ) %>%
+  left_join(read_tsv(file.path(path, "rawMatrix", "tSNE.coords.tsv"),
+                     col_names = c("cell", "tSNE1", "tSNE2")),
+            by = "cell") %>% select(cell, tSNE1, tSNE2, everything())
 # info per patient:
 sampleTable <-
   cellinfo %>% select( sample : RNA.Integrity.Number ) %>% unique
@@ -345,11 +349,22 @@ kernel_weights <- apply(nndists_cells,
 
 
 ```{r}
+smooth_list <- lapply(rownames(Ccounts), function(g) NULL)
+names(smooth_list) <- rownames(Ccounts) # 5 MB of empty shell, who cares
+
+
 knn_smooth <- function(g = "SYT1"){
-# knn-smooth a gene with tricube weights
- norm_umis <- matrix(Ccounts[g, c(nn_cells)] / sfs[c(nn_cells)],
-                     ncol = ncol(nn_cells))
- knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) / colSums(kernel_weights)
+# knn-smooth a gene with tricube weights.
+# Side effect: saves smoothing to smooth_list so we don't have to recompute.
+
+if(is.null(smooth_list[[g]])){ 
+   norm_umis <- matrix(Ccounts[g, c(nn_cells)] / sfs[c(nn_cells)],
+                       ncol = ncol(nn_cells))
+   knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) / colSums(kernel_weights)
+   smooth_list[[g]] <<- knn_smoothed
+   }
+  
+  smooth_list[[g]]
 }
 
 
@@ -361,19 +376,11 @@ make_p <- function(df) {  # custom function to save some typing - pure laziness
 
 
 
-
-```{r}
-syt1 <- knn_smooth("SYT1")
-cux2 <- knn_smooth("CUX2")
-DPP10<- knn_smooth("DPP10") # anticorrelated with CUX2, 
-rorb <- knn_smooth("RORB")
-```
-
 Smoothing looks convincing:
 ```{r}
 plot_grid(
     data.frame(umap_euc, Gene = Tcounts[, "SYT1"]/sfs) %>% make_p,
-    data.frame(umap_euc, Gene = syt1) %>% make_p
+    data.frame(umap_euc, Gene = knn_smooth("SYT1")) %>% make_p
 )
 ```
 
@@ -383,34 +390,27 @@ plot_grid(
 ### CUX2 cells
 
 
-Cells can be separated in principle by smoothed cux2 expression:
+Cells can be separated in principle by smoothed cux2 expression.
+DPP10 is anticorrelated with CUX2.
+RORB is a marker used in the paper for L4.
 ```{r}
-data.frame(umap_euc, syt1, cux2, rorb) %>% 
+data.frame(umap_euc,
+           syt1 = knn_smooth("SYT1"),
+           cux2 = knn_smooth("CUX2"),
+           rorb = knn_smooth("RORB")) %>% 
   ggplot() + geom_point(aes(syt1, cux2, col = cux2 > .00025), size=.1) + coord_fixed() + 
   scale_x_continuous(trans = "sqrt") +
   scale_y_continuous(trans = "sqrt")
 ```
 Patient heterogeneity in CUX2:
 ```{r}
-data.frame(cellinfo, cux2, celltypes_louv) %>%
-  mutate(tmp = case_when(
-    celltypes_louv %in% c("Neuron_excit", "neurons_NRGN") ~ as.character(celltypes_louv),
-    TRUE ~ "other"
-  ) ) %>% 
-  ggplot(aes(factor(sample), cux2, col = tmp))+geom_jitter(size=.1) + 
-  scale_y_continuous(trans=power_trans(1/2)) +
-  theme(axis.text.x  =  element_text(angle = 90))
-
-
-
-
-data.frame(cellinfo, cux2, celltypes_louv) %>%
+data.frame(cellinfo, cux2 = knn_smooth("CUX2"), celltypes_louv) %>%
   mutate(tmp = case_when(
     celltypes_louv %in% c("Neuron_excit", "neurons_NRGN") ~ as.character(celltypes_louv),
     TRUE ~ "other"
   ) ) %>% 
   filter(celltypes_louv == "Neuron_excit") %>%
-  ggplot(aes(cux2, col = factor(sample)))+geom_density()
+  ggplot(aes(cux2, col = factor(individual)))+ facet_wrap(~region) + geom_density() +
   scale_x_continuous(trans=power_trans(1/2)) +
   theme(axis.text.x  =  element_text(angle = 90))
 ```
@@ -419,7 +419,7 @@ data.frame(cellinfo, cux2, celltypes_louv) %>%
 
 What correlates with cux2? 
 ```{r}
-sel <- celltypes_louv == "Neuron_eblxcit"   &   
+sel <- celltypes_louv == "Neuron_excit"   &   
   dblts_perc < 3/50  & nn_inothercluster < 1
 poisson_vmr <- mean(1/sfs[sel])
 gene_means <- rowMeans( norm_counts[, sel] )
@@ -429,10 +429,11 @@ is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
 plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
 points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
 
-# compute patient-ignorant (across all cells)
-gene_cors <- cor(cux2[sel], as.matrix(t(norm_counts[is_informative,sel])))
-gene_cors <- gene_cors[1,] # from matrix to vector
-head(sort(abs(gene_cors), decreasing = T), n=20)
+# compute patient-ignorant (across all cells).
+# Note:  correlation coefs are stronger after smoothing but order is similar - at least for CUX2
+gene_cors <- cor(sqrt(knn_smooth("CUX2"))[sel],
+                 sqrt(as.matrix(t(norm_counts[is_informative,sel]))))[1,]
+gene_cors[ order(abs(gene_cors), decreasing = TRUE)[1:20] ]
 ```
 
 ```{r}
@@ -444,8 +445,8 @@ plot_grid(
 
 ASD vs control: do gene correlations with CUX2 change with disease?
 ```{r}
-normcounts_for_cor <- as.matrix(t(norm_counts[is_informative, ]))
-cux2_for_cor <- norm_counts["CUX2", ]
+normcounts_for_cor <- sqrt(as.matrix(t(norm_counts[is_informative, ])))
+cux2_for_cor <- sqrt(knn_smooth("CUX2")/sfs)
 cors_per_sample <- lapply(unique(cellinfo$sample), function(smp){
   smp_sel <- cellinfo$sample == smp  &  sel
   print(paste0(smp, ":  ", sum(smp_sel)))
@@ -463,8 +464,9 @@ res %>% rownames_to_column("Gene") %>% filter(p.value < .1) %>% arrange(desc(dm)
 
 
 ```{r}
-data.frame(cors_factor,t(cors_per_sample)) %>%
-  ggplot(aes(cors_factor, PBX1))+geom_point()
+data.frame(cors_factor,t(cors_per_sample)) %>% rownames_to_column("sample") %>%
+    left_join(sampleTable, by = "sample") %>%
+    ggplot(aes(cors_factor, LINGO2, col = region))+geom_jitter(height=0, width = .1)
 ```
 
 
@@ -482,7 +484,7 @@ plot_grid(
 
 Excitatory Neurons
 ```{r}
-SLC17A7 <- knn_smooth("SLC17A7") # glial cells + endo
+SLC17A7 <- knn_smooth("SLC17A7") 
 data.frame(umap_euc, Gene = Tcounts[, "SLC17A7"]/sfs) %>% make_p
 data.frame(umap_euc, Gene = SLC17A7) %>% make_p
 ```
@@ -528,89 +530,134 @@ data.frame(umap_euc, Gene = Tcounts[, "CARM1P1"]/sfs) %>% make_p
 Smoothing is useful for gene-based questions, so let's ask some.
 
 
-Question: Gene X is variable amongst excit_neurons: can we learn more about it?
 
-```{r hvgs_excitNeurons}
-sel <- celltypes_louv == "Neuron_excit"   &   
+Question: Gene X is bimodal in excitatory neurons and we want to characterize
+the two populations.
+
+Here are excitatory neurons:
+```{r}
+is_cl  <- celltypes_louv == "Neuron_excit"   &   
   dblts_perc < 3/50  & nn_inothercluster < 1
-poisson_vmr <- mean(1/sfs[sel])
-gene_means <- rowMeans( norm_counts[, sel] )
-gene_vars <- rowVars_spm( norm_counts[,sel] )
-is_expressed <- colSums( Tcounts[sel,] != 0 ) > 200
-is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
-plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
-points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
 
-
-# PCA on excit Neurons:
-pc_excit <- irlba::prcomp_irlba(sqrt(t(norm_counts[is_informative, sel])), n = 20, scale. = TRUE)
-
-rots <- pc_excit$rotation
-rownames(rots) <- rownames(norm_counts)[is_informative]
-
-
-library(mgcv)
-total_res <- sapply(1:20, function(i){
-  print(i)
- fit <- gam(gene ~ pc, offset = log(sfs),
-    data = data.frame(gene = Tcounts[sel, "RMST"],
-                      sfs=sfs[sel],
-                      pc = pc_excit$x[,i]))
- sum(abs(fit$residuals)) 
-})
-
-
-i <- 5
-fit <- gam(gene ~ s(pc),# offset = log(sfs),
-    data = data.frame(gene = Tcounts[sel, "RMST"],
-                      sfs=sfs[sel],
-                      pc = pc_excit$x[,i]))
-
-data.frame(gene = Tcounts[sel, "RMST"],
-           sfs=sfs[sel],
-           pc = pc_excit$x[,i],
-           fitted = fit$fitted.values,
-           offset = fit$offset,
-           residuals = fit$residuals) %>%
-  ggplot() +
-  geom_jitter(aes(pc, gene, col = residuals), size=.1) +
-  geom_point(aes(pc, fitted#/offset
-                 ), col = "red")
 ```
+and here are genes that looked bimodal in my linked charts app
+(see commit 5a3e79ac7649b59606b897329ddea51624e3302e):
+```{r hvgs_excitNeurons}
+bimodal_genes <- c(
+  "KIAA1217",
+  "HTR2C",
+  "ZNF385D",
+  "TSHZ2",
+  "HS3ST4",  # trimodal?
+  "DLC1",
+  "POU6F2",  # ill-separated peaks
+  "CA10",  # ill-separated peaks
+  "TMTC2",  # ill-separated peaks
+  "CACNB2",  # ill-separated peaks
+  "CTC-535M15.2",
+  "Meis2",  # VMR is not spectacular but bimodality well visible
+  "GRIN1",
+  "CNTNAP5",
+  "CPNE4"
+  
+)
+
+not_bimodal <- c(
+  "GPC5",
+  "ENC1",
+  "PTPRT",
+  "SYN2",
+  "STMN1",
+  "INO80D",
+  "MCTP1"  # trimodal, in my opinion
+  
+)
+```
+
 
 ```{r}
-# top VMRs in cluster "Neurons_excit", filtered out very highly expressed genes:
-data.frame(vmr = gene_vars / gene_means, mean=gene_means, is_informative) %>%
-  rownames_to_column("Gene") %>% filter(mean < 1e-4, is.finite(vmr), vmr > 5e-4,
-                                        is_informative) %>%
-  arrange(desc(mean))  %>% head(n=20)
-          
+g <- "TSHZ2"
+
+plot_grid(
+ data.frame(umap_euc, Gene = Tcounts[, g]/sfs/mean(1/sfs)) %>% make_p,
+ data.frame(umap_euc, Gene = knn_smooth(g)/mean(1/sfs)) %>% make_p 
+)
+
+# in paper TSNE:
+plot_grid(
+  data.frame(cellinfo, Gene = knn_smooth("TSHZ2")/mean(1/sfs)) %>%
+    ggplot(aes(tSNE1, tSNE2, col = Gene))+geom_point(size=.1) + coord_fixed()+
+    scale_color_sqrt() + facet_wrap(~ region + diagnosis),
+  cellinfo %>% ggplot(aes(tSNE1, tSNE2, col = cluster))+ geom_point(size=.1)+ 
+    coord_fixed() +facet_wrap(~region + diagnosis) + theme(legend.position = "none"),
+  ncol=2
+ )
 ```
 
-Check out individual genes:
+
+TSHZ2 is bimodal in PFC region and marks cells across cluster boundaries.
 ```{r}
-RMST <- knn_smooth("RMST")
 
-# umap expression:
-data.frame(umap_euc, Gene = Tcounts[, "RMST"]/sfs/mean(1/sfs)) %>% make_p
-data.frame(umap_euc, Gene = RMST/mean(1/sfs)) %>% make_p
+# classification cut-off:     q/sfs/mean(1/sfs)  > 1.2
+data.frame(cellinfo, Gene = knn_smooth(g)/mean(1/sfs), celltypes_louv) %>%
+    filter(celltypes_louv == "Neuron_excit", region == "PFC") %>%
+    ggplot(aes(Gene, fill = factor(diagnosis)))+geom_histogram(bins=50) +
+    scale_x_continuous(trans=power_trans(1/2), labels = semi_scientific_formatting) +
+    theme(axis.text.x  =  element_text(angle = 90)) + facet_wrap(~individual, scales = "free_y") + ggtitle("PFC only") + geom_vline(xintercept = 1.2)
 
-# jitter-per-patient:
-data.frame(cellinfo, Gene = RMST, celltypes_louv) %>%
-  mutate(tmp = case_when(
-    celltypes_louv %in% c("Neuron_excit", "neurons_NRGN") ~ as.character(celltypes_louv),
-    TRUE ~ "other"
-  ) ) %>% 
-  ggplot(aes(factor(sample), Gene, col = tmp))+geom_jitter(size=.1) + 
-  scale_y_continuous(trans=power_trans(1/2)) +
-  theme(axis.text.x  =  element_text(angle = 90))
-
-data.frame(cellinfo, RMST, celltypes_louv) %>%
-  filter(celltypes_louv == "Neuron_excit") %>%
-  ggplot(aes(RMST, col = factor(diagnosis)))+geom_density() +
-  scale_x_continuous(trans=power_trans(1/2), labels = semi_scientific_formatting) +
-  theme(axis.text.x  =  element_text(angle = 90)) + facet_wrap(~individual)
 ```
+
+
+Genes discriminating TSHZ2-positive and negative excitatory Neurons:
+```{r}
+cell_groups <- paste(
+  paste0(cellinfo$region, "_", cellinfo$individual),
+  ifelse(knn_smooth("TSHZ2")/mean(1/sfs) > 1.2, "positive", "negative"),
+  sep="_")
+
+
+sel <- celltypes_louv == "Neuron_excit"  & dblts_perc < 3/50  & nn_inothercluster < 1
+pseudobulks <- as.matrix(t( fac2sparse(cell_groups[sel]) %*% t(Ccounts[, sel]) ))
+
+coldat <- data.frame(do.call(rbind, colnames(pseudobulks) %>% str_split("_")))
+colnames(coldat) <- c("region", "individual", "MarkerExpression")
+rownames(coldat) <- colnames(pseudobulks)
+
+
+library(DESeq2)
+dds <- DESeqDataSetFromMatrix(pseudobulks[, grepl("^PFC_", colnames(pseudobulks))],
+                              coldat[grepl("^PFC_", colnames(pseudobulks)), ],
+                              design = ~ individual + MarkerExpression)
+dds <- DESeq(dds)
+results(dds, name = "MarkerExpression_positive_vs_negative") %>% as.data.frame() %>%
+  rownames_to_column("Gene") %>%
+  filter(padj < .1, baseMean > 50) %>% arrange(desc(abs(log2FoldChange))) %>%
+  filter(!grepl("^RP", Gene)) %>% head(n=20) %>% pull(Gene)
+
+
+
+"HTR2C", "TSHZ2"      "COBLL1"     "IFNG-AS1"   "LINC00507"  "VWC2L"      "GABRG1"     "CBLN2" 
+"NXPH2"     
+"AC133680.1" "NPSR1-AS1"  "GRID2"      "GOLIM4"     "COL24A1"    "GULP1"      "SLC38A11"   "TENM3"
+"ZNF804A"   
+"SERPINE2"   "GNG2"
+
+
+
+g <- "TSHZ2"
+g <- "COBLL1"
+cellinfo %>%
+  left_join(data.frame(cell = rownames(Tcounts), Gene = Tcounts[, "TSHZ2"]/sfs/mean(1/sfs))) %>%
+    ggplot(aes(tSNE1, tSNE2, col = Gene)) + geom_point(size = .1) + scale_color_sqrt() + 
+    ggtitle(g) + coord_fixed() + facet_wrap(~ diagnosis + region)
+
+
+
+
+```
+
+
+
 
 
 
@@ -620,6 +667,8 @@ data.frame(cellinfo, RMST, celltypes_louv) %>%
 
 ```{r}
 sel <- celltypes_louv == "Neuron_excit"  & dblts_perc < 3/50  & nn_inothercluster < 1
+# cells with serotonin receptor:
+sel <- knn_smooth("HTR2C")/mean(1/sfs)> 2  & celltypes_louv == "Neuron_excit" 
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
@@ -686,144 +735,6 @@ load(file.path(path, "savepoint", "doublets.RData"))
 
 
 
-
-
-## Linked charts
-
-HVGs for excitatory Neurons:
-```{r hvg_excit}
-is_cl  <- celltypes_louv == "Neuron_excit"   &   
-  dblts_perc < 3/50  & nn_inothercluster < 1
-# 
-
-# counts <- counts[, is_cl]  # to make it fit into laptop memory
-counts <- as(counts, "dgCMatrix")
-sfs <- colSums(counts)
-norm_counts <- t(t(counts[, is_cl]) / sfs[is_cl])
-rownames(norm_counts) <- rownames(counts)
-
-poisson_vmr <- mean(1/sfs[is_cl])
-gene_means <- rowMeans( norm_counts )
-gene_vars <- rowVars_spm( norm_counts )
-is_expressed <- rowSums( norm_counts != 0 ) > 100
-is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
-plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
-points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
-```
-
-
-```{r rlc}
-library(rlc)
-
-
-nn_cells_cl <- nn_cells[is_cl, ]
-kernel_weights <- apply(nndists_cells[is_cl, ],
-                        1,
-                        function(d) tricube_fromNN1(d, max(d)))
-
-
-# knn-smooth a gene with tricube weights
-g <- "CUX2"
-norm_umis <- matrix(counts[g, c(nn_cells_cl)] / sfs[c(nn_cells_cl)],
-                    ncol = ncol(nn_cells_cl))
-knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) /
-                colSums(kernel_weights)
-
-
-
-
-
-data.frame(cell=colnames(counts), umap_euc) %>% left_join(data.frame(cell = colnames(counts)[is_cl], Gene = knn_smoothed)) %>% ggplot(aes(X1, X2, col = Gene))+geom_point(size=.1) + scale_color_sqrt()
-```
-
-linked chart:
-```{r}
-inverse_gamma <- 1
-means <- log10(gene_means[is_expressed])
-vars  <- log10( (gene_vars/gene_means)[is_expressed] )
-genes <- names(means)
-
-smooth_list <- lapply(genes, function(x) NULL)
-names(smooth_list) <- genes
-
-knn_smooth <- function(g){
-  if(is.null(smooth_list[[g]])){
-   norm_umis <- matrix(counts[g, c(nn_cells_cl)] / sfs[c(nn_cells_cl)],
-                      ncol = ncol(nn_cells_cl))
-   knn_smoothed <- rowSums(norm_umis * t(kernel_weights)) /
-                   colSums(kernel_weights)   
-   smooth_list[[g]] <<- knn_smoothed}
-  return(smooth_list[[g]])
-}
-gene <- "CUX2"
-
-openPage()
-lc_scatter(dat(size = 2,
-               title = gene,
-               on_click = function(value) {
-                 gene <<- genes[value]
-                 updateCharts(c("vmr", "A1"),
-                              updateOnly = c("Title", ""))
-               }),
-           x = means,
-           y = vars,
-           width = 400, height = 400,
-           "vmr"
-)
-
-lc_hist(dat(value = knn_smooth(gene)^(1/inverse_gamma),
-            title = gene,
-            nbins = 30), "A1")
-
-
-lc_input(type = "range",
-         label = c("Inverse Power (1/gamma)"),
-         width = 300,
-         value = c(1),
-         min = c(1),
-         max = c(10),
-         step = c(1),
-         on_change = function(value) {
-           inverse_gamma <<- value[1]
-           updateCharts("A1")
-
-         })
-
-
-```
-
-Manually I click through some genes and note down bimodal ones here:
-```{r}
-bimodal_genes <- c(
-  "KIAA1217",
-  "HTR2C",
-  "ZNF385D",
-  "TSHZ2",
-  "HS3ST4",  # trimodal?
-  "DLC1",
-  "POU6F2",  # ill-separated peaks
-  "CA10",  # ill-separated peaks
-  "TMTC2",  # ill-separated peaks
-  "CACNB2",  # ill-separated peaks
-  "CTC-535M15.2",
-  "Meis2",  # VMR is not spectacular but bimodality well visible
-  "GRIN1",
-  "CNTNAP5",
-  "CPNE4"
-  
-)
-
-not_bimodal <- c(
-  "GPC5",
-  "ENC1",
-  "PTPRT",
-  "SYN2",
-  "STMN1",
-  "INO80D",
-  "MCTP1"  # trimodal, in my opinion
-  
-)
-```
 
 
 
