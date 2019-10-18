@@ -524,15 +524,12 @@ data.frame(umap_euc, Gene = Tcounts[, "CARM1P1"]/sfs) %>% make_p
 
 
 
-## Genes of interest
+## Gene-based classification
 
 
 Smoothing is useful for gene-based questions, so let's ask some.
 
 
-
-Question: Gene X is bimodal in excitatory neurons and we want to characterize
-the two populations.
 
 Here are excitatory neurons:
 ```{r}
@@ -575,6 +572,73 @@ not_bimodal <- c(
 ```
 
 
+### HTR2C splits L5/6 cluster into two
+
+```{r}
+# execute once to compute smoothing
+data.frame(cellinfo, Gene = knn_smooth("HTR2C")/mean(1/sfs)) %>% 
+  ggplot(aes(tSNE1, tSNE2, col = Gene))+geom_point(size=.1)+coord_fixed()+scale_color_sqrt()
+```
+
+Compare this to the clusters from the paper: L5/6 clearly splits into two
+parts, one expressing HTR2C and the other one not.
+```{r}
+cellinfo %>% ggplot(aes(tSNE1, tSNE2, col = cluster))+geom_point()
+```
+
+Let's select cells NOT expressing it:
+```{r}
+data.frame(cellinfo, Gene = knn_smooth("HTR2C")/mean(1/sfs) ) %>% 
+  ggplot(aes(tSNE1, tSNE2, col = Gene < 1 & cluster == "L5/6"))+geom_point(size=.1)+coord_fixed()
+```
+
+
+```{r}
+# run with or without HTR2C < 1, compare:
+sel <- cellinfo$cluster == "L5/6"  #& knn_smooth("HTR2C")/mean(1/sfs) < 1
+
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+  mutate(individual = factor(individual),
+         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+         region    = factor(region))
+rownames(coldat) <- coldat$sample
+
+dds <- DESeq2::DESeqDataSetFromMatrix( pseudobulks,
+                               coldat[colnames(pseudobulks), ],
+                               design = ~ sex + region + age + diagnosis )
+# For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
+# DESeq's LTR for this (see mail to Simon at mid-September 2019).
+dds <- DESeq2::DESeq(dds, 
+             parallel=TRUE, BPPARAM=BiocParallel::MulticoreParam(20))
+res_df <- DESeq2::results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+```
+
+
+```{r}
+plot(-log10(res_null$padj), -log10(res_alt$padj), asp=1, pch=20, cex=.5); abline(0,1); abline(h=1); abline(v=1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### TSHZ2 splits L4 into two
+The L4 cluster from the paper (marked by RORB) splits into two "halves" - one
+expressing TSHZ2, COBLL1, VWC2L and others, while the other
+half is negative for those and expresses GRID2, COL24A1, TENM3 and CA10.
+
+
+In PFC the effect seems larger than in ACC:
 ```{r}
 g <- "TSHZ2"
 
@@ -608,7 +672,9 @@ data.frame(cellinfo, Gene = knn_smooth(g)/mean(1/sfs), celltypes_louv) %>%
 ```
 
 
-Genes discriminating TSHZ2-positive and negative excitatory Neurons:
+#### Genes discriminating TSHZ2-positive and negative excitatory Neurons:
+I simply find markers for the two "halves" of the L4 cluster from the paper using
+DESeq. This chunk is a bit messy, feel free to skip.
 ```{r}
 cell_groups <- paste(
   paste0(cellinfo$region, "_", cellinfo$individual),
@@ -659,6 +725,81 @@ cellinfo %>%
 
 
 
+#### DEGs for L4 and TSHZ2+ L4 - how different are they?
+Number of cells per pseudobulk:
+```{r}
+table(sample = cellinfo$sample,
+      L4 = cellinfo$cluster == "L4" & knn_smooth("TSHZ2")/mean(1/sfs) > 1.2 &
+           cellinfo$region == "PFC")
+```
+
+
+
+TSHZ2-bimodality is less pronounced in region ACC judged from the histograms (not shown),
+but note that's probably because
+it has less cells per donor in L4.
+
+If we limit to cells from region PFC and demand padj < .1, we get 0 DEGs for
+L4 and 10 DEGs for L4/expressing TSHZ2. (FYI: This is without excluding potential doublets).
+This could make sense if TSHZ2-expressing cells are different from non-expressing
+cells, so if we take ALL of L4 we throw together different cell types in each sample,
+and I expect this to increase pseudobulk variability.
+
+Two notes of caution, however:
+  - the p-value histogram looks strange (uniform from 0-.6, then a peak),
+perhaps pseudobulks do NOT follow negative binomial?
+  - Also, if we include both regions, we get more significant hits overall, somewhat
+non-surprising. However, now we get MUCH more hits for the entire L4 cluster
+as when we only include TSHZ2-expressing cells from L4, so it's the other way
+around than before... this makes no sense to me, it is difficult to draw a
+conclusion.
+
+```{r}
+sel <-  cellinfo$cluster == "L4"  &     cellinfo$region == "PFC" |
+        cellinfo$cluster == "L4" & cellinfo$region == "ACC"
+# sel <- sample(which(cellinfo$cluster == "L4"), sum(sel))   # for comparison
+
+
+pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
+coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
+  mutate(individual = factor(individual),
+         diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+         region    = factor(region))
+rownames(coldat) <- coldat$sample
+
+
+dds <- DESeq2::DESeqDataSetFromMatrix( pseudobulks,
+                               coldat[colnames(pseudobulks), ],
+                               design = ~ sex +  age + region + diagnosis )
+# For cluster 5, I tested that we do not need interactions between sex, region and diagnosis. I used
+# DESeq's LTR for this (see mail to Simon at mid-September 2019).
+dds <- DESeq2::DESeq(dds, 
+             parallel=TRUE, BPPARAM=BiocParallel::MulticoreParam(20))
+res_df <- DESeq2::results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+
+```
+
+This is one of the 10 hits we get when excluding TSHZ2-negative cells from L4:
+```{r}
+data.frame(cellinfo, Gene = Tcounts[, "LSM10"], sfs,
+           sel = cellinfo$cluster == "L4" &
+             knn_smooth("TSHZ2")/mean(1/sfs) < 1.2 &
+             cellinfo$region == "PFC") %>% 
+  filter(sel) %>% 
+  ggplot(aes(tSNE1, tSNE2, col = Gene/sfs/mean(1/sfs)))+
+  geom_point(size=.1)+ scale_color_sqrt() +
+  facet_wrap(~diagnosis) + coord_fixed()
+```
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -666,9 +807,8 @@ cellinfo %>%
 
 
 ```{r}
-sel <- celltypes_louv == "Neuron_excit"  & dblts_perc < 3/50  & nn_inothercluster < 1
-# cells with serotonin receptor:
-sel <- knn_smooth("HTR2C")/mean(1/sfs)> 2  & celltypes_louv == "Neuron_excit" 
+sel <- cellinfo$cluster == "L5/6"  & knn_smooth("HTR2C")/mean(1/sfs) < 1
+#& dblts_perc < 3/50  & nn_inothercluster < 1
 pseudobulks <- as.matrix(t( fac2sparse(cellinfo$sample[sel]) %*% t(Ccounts[, sel]) ))
 coldat <- filter(sampleTable, sample %in% colnames(pseudobulks)) %>% 
   mutate(individual = factor(individual),
@@ -684,13 +824,45 @@ dds <- DESeq2::DESeqDataSetFromMatrix( pseudobulks,
 dds <- DESeq2::DESeq(dds, 
              parallel=TRUE, BPPARAM=BiocParallel::MulticoreParam(20))
 res_df <- DESeq2::results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+```
 
+
+
+```{r}
+
+
+
+
+# new thought: we have to compare same number of cells, so we kick out
+# either n doublets or n random cells and see where signal is better
+
+plot(-log10(res_excit_random$padj), -log10(res_excit_rmD$padj), asp=1); abline(0,1); abline(h=1); abline(v=1)
+
+
+plot(-log10(res_SST_random$padj), -log10(res_SST_rmD$padj), asp=1); abline(0,1); abline(h=1); abline(v=1)
+
+
+plot(-log10(res_VIP_random$padj), -log10(res_VIP_rmD$padj), asp=1); abline(0,1); abline(h=1); abline(v=1)
+
+plot(-log10(res_l56$padj), -log10(res_l56_noHTR2C$padj), asp=1); abline(0,1); abline(h=1); abline(v=1)
+```
+
+
+
+
+```{r}
 
 
 data.frame(umap_euc, Gene = Tcounts[, "ZNF770"], sfs=sfs, diagnosis=cellinfo$diagnosis) %>%
   ggplot(aes(X1, X2, col=Gene/sfs/mean(1/sfs)))+geom_point(size=.1) +
   scale_color_sqrt(name="ZNF770") +
   facet_wrap(~ diagnosis) + coord_fixed()
+
+
+data.frame(cellinfo, Gene = Tcounts[, "ZNF385D"], sfs=sfs) %>% 
+    ggplot(aes(tSNE1, tSNE2, col = Gene/sfs/mean(1/sfs)))+geom_point(size=.1) + coord_fixed() + scale_color_sqrt()
+
+
 
 ```
 
