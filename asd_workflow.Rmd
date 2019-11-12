@@ -913,5 +913,100 @@ load(file.path(path, "savepoint", "doublets.RData"))
 
 
 
+# scpr
+
+Let's see how long scpr smoothing takes on such large data.
+
+```{r}
+tricube_fromNN1 <- function(x, halfwidth=1) {
+  # tricube kernel function with sef: self equals first neighbor.
+  #
+  # formula adapted from (wikipedia)[https://en.wikipedia.org/wiki/Kernel_(statistics)],
+  # and expanded to contain `halfwidth`.
+  # distance to oneself is 0 so we mask it:
+  self_id <- which.min(x)
+  x[self_id] <- NA
+  nn_dist <- min(x, na.rm = TRUE) # distance to first nearest neighbor
+  x <- x - nn_dist
+  halfwidth <- halfwidth - nn_dist
+  tricube <- 70/81/halfwidth * (1 - abs(x/halfwidth)^3)^3
+  # outside of kernel support (-halfwidth, +halfwidth), tricube is defined as 0:
+  tricube[ abs(x) > halfwidth ] <- 0
+  tricube[self_id] <- tricube[which.max(tricube)]
+  return(tricube)
+}
+```
+
+
+
+
+```{r}
+# same for every gene:
+totalUMI <- sfs
+lambda <- 1
+lambda_seq <- 10^(seq( log10(lambda), log10(1000), length.out = 100))
+kernel_weights <- apply(nndists_cells, 1, function(d) tricube_fromNN1(d, max(d)))
+
+
+
+g <- "CUX2"
+gene_umis <- Tcounts[, g]
+scaled_pcs <- scale(pca$x)
+
+
+```
+
+
+smooth one cell:
+```{r}
+fitcell <- function(cell_id) {
+  neighbors <- nn_cells[cell_id, ]
+  if(sum(gene_umis[neighbors]) <= 5){return(0)} # glmnet throws error otherwise
+  fit <- glmnet::glmnet(
+    x = scaled_pcs[neighbors,],
+    y = gene_umis[neighbors],
+    weights = kernel_weights[, cell_id],
+    family = "poisson",
+    offset = log( totalUMI[neighbors] ),
+    lambda = lambda_seq,
+    alpha = 0, # ridge regression
+    standardize = FALSE # featureMatrix was scaled already above
+    )
+  # glmnet.predict returns the linear predictor irrespective of whether
+  # type is set to "link" or "response", so we exponentiate it to obtain mu:
+  estimate <- exp( glmnet::predict.glmnet(
+    # What I mean by 'linear predictor' and 'mu':
+    # In the following Poisson-GLM form, the RHS (right-hand side) is the
+    # linear predictor and mu is the estimated Poisson rate (smoothed UMI):
+    #     log( mu ) = log(totalUMI) + X %*% Beta
+    object    = fit,
+    newx      = matrix(scaled_pcs[cell_id,], nrow=1),
+    s         = lambda,
+    newoffset = log(totalUMI[cell_id]),
+    type      = "link") )
+
+  estimate
+}
+```
+
+
+
+```{r}
+date()
+res <- lapply(1:length(gene_umis), fitcell) # 4 minutes 20 sec
+date()
+```
+
+
+
+
+
+
+
+
+
+
+
+
 
 
