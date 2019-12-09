@@ -78,7 +78,7 @@ points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch="
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
-seed(100)
+set.seed(100)
 u <- uwot::umap( pca$x, spread = 10, n_threads = 40) # euc: euclidean distance
 u <- as_tibble(u, .name_repair = ~ c("u1", "u2"))
 
@@ -146,6 +146,78 @@ knn_smooth <- function(g = "SYT1"){
 
 
 
+
+
+# Marker examples ---------------------------------------------------------
+
+
+# threeCelltypes 
+three_celltypes_1 <- matrix(0, ncol=3, nrow=4); diag(three_celltypes_1) <- 1
+dimnames(three_celltypes_1) <- list(Class = c("Oligod", "OPC", "Astrocyte", "other"),
+                                  Gene  = c("CNP", "PDGFRA", "AQP4"))
+# threeCelltypes - alternative 2:
+three_celltypes_2 <- matrix(0, ncol=3, nrow=4); diag(three_celltypes_2) <- 1
+dimnames(three_celltypes_2) <- list(Class = c("Oligod", "OPC", "Astrocyte", "other"),
+                                  Gene  = c("PLP1", "TNR", "AQP4"))
+
+# inhibitory_exhibitory Neurons:
+ie_neurons <- matrix(c(1,1,0, 1,0,0, 0,1,0), nrow=3, dimnames = list(
+  Class = c("inhibitory", "excitatory", "other"),
+  Gene  = c("SYT1", "GAD1", "SATB2")
+))
+
+
+# fiveCelltypes:
+five_celltypes <- matrix(0, nrow=6, ncol = 5); diag(five_celltypes) <- 1
+dimnames(five_celltypes) <- list(
+  Class = c("Oligod", "OPC", "Astro", "Microglia", "endo", "other"),
+  Gene  = c("PLP1", "TNR", "AQP4", "PTPRC_ENSG00000081237", "VWF")
+)
+
+five_plusN <- matrix(0, nrow=7, ncol = 6); diag(five_plusN) <- 1
+dimnames(five_plusN) <- list(
+  Class = c("Oligod", "OPC", "Astro", "Microglia", "endo", "Neuron", "other"),
+  Gene  = c("PLP1", "TNR", "AQP4", "PTPRC_ENSG00000081237", "VWF", "SYT1")
+)
+
+
+five_plusN_subtypes <- matrix(0, nrow=8, ncol = 8); diag(five_plusN_subtypes) <- 1
+dimnames(five_plusN_subtypes) <- list(
+  Class = c("Oligod", "OPC", "Astro", "Microglia", "endo", "iNeuron", "eNeuron", "other"),
+  Gene  = c("PLP1", "TNR", "AQP4", "PTPRC_ENSG00000081237", "VWF",
+            "SYT1", "GAD1", "SATB2")
+)
+five_plusN_subtypes["iNeuron", "GAD1"] <- 1
+five_plusN_subtypes["eNeuron", "GAD1"] <- 0
+five_plusN_subtypes["eNeuron", c("SYT1","SATB2")] <- 1
+five_plusN_subtypes["other", "SATB2"] <- 0
+
+
+
+
+
+# Literature search (cumbersome) ------------------------------------------
+# Markers come from these sources:
+#  Velmeshev, Science 2019
+#  Amel from Schirmer group ("Marker genes" email from August 2019)
+#  Mariani, ..., Vaccarino (2012 in PNAS)
+#  Kang, Nature 2011
+#    Note that Kang et al. have NOT sorted celltypes, they just curated literature
+#    for markers.
+
+
+# Markers from Kang and Mariani (deleted unexpressed markers):
+genes_l5 <- c("BCL11B", "ETV1", "TLE4")])  # note: BCL11B aka CTIP2
+# Markers from Kang: (deleted unexpressed markers):
+genes_l6 <- c("ZFPM2", "TLE4", "FOXP2", "TBR1", "SOX5")
+genes_l234 <- c("CUX1", "UNC5D")
+genes_l4   <- c("RORB")
+
+# AQP4 is from Amel, rest from Kang:
+genes_astro <- c("GFAP", "S100B", "ALDOC", "AQP4")
+
+#  PTPRC from Amel, rest from Kang:
+genes_microglia <- c("CFH", "FCER1G", "TNIP2", "PTPRC_ENSG00000081237")
 
 
 # Classification ----------------------------------------------------------
