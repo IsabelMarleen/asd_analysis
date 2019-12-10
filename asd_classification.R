@@ -237,22 +237,51 @@ genes_microglia <- c("CFH", "FCER1G", "TNIP2", "PTPRC_ENSG00000081237")
 
 # Classification ----------------------------------------------------------
 
-
-
-sapply(c(
-"SLC17A7", # excitatory neurons
-"PLP1",    # oligodendrocytes
-"SLC1A2"  # glial / astro
-), knn_smooth)
-
-
-data.frame(sapply(c(
-  "SLC17A7", # excitatory neurons
-  "PLP1",    # oligodendrocytes
-  "SLC1A2"  # glial / astro
-), knn_smooth)) %>% bind_cols(u) %>%
+# smooth and visualize (takes a while on first computation):
+data.frame(sapply(colnames(five_plusN_subtypes), knn_smooth)) %>%
+  bind_cols(u) %>%
   gather(Gene, knn, -u1, -u2) %>%
   ggplot(aes(u1, u2, col = knn)) + geom_point(size=.5)+coord_fixed()+
   facet_wrap(~Gene) + scale_color_sqrt()
+
+
+# some PFC samples with good number of cells:   (PFC was arbitrarily chosen over ACC)
+a_male_control <- cellinfo$sample == "5958_BA9"
+b_male_asd     <- cellinfo$sample == "5864_BA9"
+
+male_controls_pfc <- cellinfo$region=="PFC" &
+  cellinfo$sex == "M" &
+  cellinfo$diagnosis == "Control"
+male_asd_pfc <- cellinfo$region=="PFC" &
+  cellinfo$sex == "M" &
+  cellinfo$diagnosis == "ASD"
+female_controls_pfc <- cellinfo$region=="PFC" &
+  cellinfo$sex == "F" &
+  cellinfo$diagnosis == "Control"
+
+
+# do the thing:
+ms <- five_celltypes
+expr <- data.frame(sapply(colnames(ms),
+                          knn_smooth) / sfs / mean(1/sfs) + .1/50)
+sel <- male_controls_pfc
+expr <- expr[sel,]
+
+p <-learnClasses(ms, expr)
+
+
+p_umap <- u[sel, ] %>%
+  bind_cols(class=apply(p, 1, function(x)
+    ifelse(max(x) > .9, colnames(p)[which.max(x)], NA) )) %>%
+  mutate(class = factor(class, levels = colnames(p))) %>%
+  ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) +
+  scale_color_manual(values = scales::hue_pal()(ncol(p)),
+                     drop=F, na.value = "grey")
+p_umap
+
+
+
+
+
 
 
