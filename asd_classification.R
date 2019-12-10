@@ -281,6 +281,29 @@ p_umap
 
 
 
+# at each iteration, plot the current status to understand what's going on:
+learnClasses <- edit(learnClasses)
+#    next_stop <- 0
+#    colnames(p) <- rownames(marker_table)
+#    if(iter >= next_stop) { plot_and_prompt(probs=p, ump =u[sel,], iter) }
+
+plot_and_prompt <- function(probs=p, ump =u[sel,], iter){
+  cat(iter)
+  em_result_plot(probs, ump)
+  next_stop <- as.numeric(readline(prompt="Next plot at start of iteration: "))
+  return(next_stop)
+}
+
+em_result_plot <- function(probs=p, ump =u[sel,]) {
+ p_umap <- ump %>%
+  bind_cols(class=apply(probs, 1, function(x)
+    ifelse(max(x) > .5, colnames(probs)[which.max(x)], NA) )) %>%
+  mutate(class = factor(class, levels = colnames(probs))) %>%
+  ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) +
+  scale_color_manual(values = scales::hue_pal()(ncol(probs)),
+                     drop=F, na.value = "grey") 
+ print(p_umap)
+}
 
 
 
