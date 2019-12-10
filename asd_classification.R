@@ -83,6 +83,21 @@ u <- uwot::umap( pca$x, spread = 10, n_threads = 40) # euc: euclidean distance
 u <- as_tibble(u, .name_repair = ~ c("u1", "u2"))
 
 
+# simplified paper_clusters in UMAP
+paper_clusters <- case_when(
+  grepl("^L", cellinfo$cluster)  ~ "excit_layers", 
+  grepl("^IN", cellinfo$cluster)  ~ "inhibitory", 
+  grepl("^AST", cellinfo$cluster)  ~ "Astro", 
+  grepl("^Neu-NRGN", cellinfo$cluster)  ~ "NRGN", 
+  TRUE ~ cellinfo$cluster) %>% factor()
+ggplot() +
+  geom_point(data = u %>% bind_cols(paper_clusters = paper_clusters),
+    aes(u1, u2, col = paper_clusters), size=.5) +
+  geom_label(data = u %>% bind_cols(paper_clusters = paper_clusters) %>%
+               group_by(paper_clusters) %>% summarise(u1=mean(u1), u2=mean(u2)),
+    aes(u1, u2, label = paper_clusters)) 
+
+
 
 # Louvain Clustering ------------------------------------------------------
 set.seed(100)
