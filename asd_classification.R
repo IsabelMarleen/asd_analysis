@@ -92,10 +92,10 @@ paper_clusters <- case_when(
   TRUE ~ cellinfo$cluster) %>% factor()
 ggplot() +
   geom_point(data = u %>% bind_cols(paper_clusters = paper_clusters),
-    aes(u1, u2, col = paper_clusters), size=.5) +
+    aes(u1, u2, col = paper_clusters), size=.5) + coord_fixed() +
   geom_label(data = u %>% bind_cols(paper_clusters = paper_clusters) %>%
                group_by(paper_clusters) %>% summarise(u1=mean(u1), u2=mean(u2)),
-    aes(u1, u2, label = paper_clusters)) 
+    aes(u1, u2, label = paper_clusters)) + theme(legend.position = "none") 
 
 
 
