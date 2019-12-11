@@ -248,7 +248,6 @@ data.frame(sapply(colnames(five_plusN_subtypes), knn_smooth)) %>%
 # some PFC samples with good number of cells:   (PFC was arbitrarily chosen over ACC)
 a_male_control <- cellinfo$sample == "5958_BA9"
 b_male_asd     <- cellinfo$sample == "5864_BA9"
-
 male_controls_pfc <- cellinfo$region=="PFC" &
   cellinfo$sex == "M" &
   cellinfo$diagnosis == "Control"
@@ -260,36 +259,46 @@ female_controls_pfc <- cellinfo$region=="PFC" &
   cellinfo$diagnosis == "Control"
 
 
-# do the thing:
-ms <- five_celltypes
+# set-up testbed:
+ms <- three_celltypes_2
 expr <- data.frame(sapply(colnames(ms),
                           knn_smooth) / sfs / mean(1/sfs) + .1/50)
 sel <- male_controls_pfc
 expr <- expr[sel,]
 
-p <-learnClasses(ms, expr)
 
 
-p_umap <- u[sel, ] %>%
-  bind_cols(class=apply(p, 1, function(x)
-    ifelse(max(x) > .9, colnames(p)[which.max(x)], NA) )) %>%
-  mutate(class = factor(class, levels = colnames(p))) %>%
-  ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) +
-  scale_color_manual(values = scales::hue_pal()(ncol(p)),
-                     drop=F, na.value = "grey")
-p_umap
 
+
+# interactive EM ----------------------------------------------------------
+
+
+library(cowplot)
+pwr_trans <- function(power){
+  # pmax is required to make it work with histograms (bins can have
+  # negative x-coordinates). Perhaps use something more failsafe?
+  scales::trans_new(
+    name = "tmp",
+    trans = function(x)   pmax(x,0)^(power),
+    inverse = function(x) pmax(x,0)^(1/power),
+    breaks = function(lims, p) power_breaks(lims, p=power) )
+}
 
 
 # at each iteration, plot the current status to understand what's going on:
 learnClasses <- edit(learnClasses)
 #    next_stop <- 0
 #    colnames(p) <- rownames(marker_table)
-#    if(iter >= next_stop) { plot_and_prompt(probs=p, ump =u[sel,], iter) }
+#    if(iter >= next_stop) { next_stop <- plot_and_prompt(probs=p, ump =u[sel,],  marker_table, expr_table, iter) }
 
-plot_and_prompt <- function(probs=p, ump =u[sel,], iter){
+plot_and_prompt <- function(probs=p, ump =u[sel,], marker_table, expr, iter){
   cat(iter)
-  em_result_plot(probs, ump)
+  print(plot_grid(
+   em_result_plot(probs, ump),
+   em_histograms(probs, marker_table, expr),
+   ncol=2
+  ))
+  
   next_stop <- as.numeric(readline(prompt="Next plot at start of iteration: "))
   return(next_stop)
 }
@@ -302,8 +311,64 @@ em_result_plot <- function(probs=p, ump =u[sel,]) {
   ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) +
   scale_color_manual(values = scales::hue_pal()(ncol(probs)),
                      drop=F, na.value = "grey") 
- print(p_umap)
+ return(p_umap)
 }
+
+em_histograms <- function(p, markers, expr) {
+  pl <- lapply(seq_along(expr), function(i) {
+    ps <- pmax(apply(p, 2, function(ps) mean(ps) * scpr:::Lgamma( expr[[i]], ps)), 1e-5)
+    data.frame(x=expr[[i]], ps) %>% gather(group, p, -x) %>%
+      # factor so that colors match the ones in p_umap:
+      mutate(group = factor(group, levels = rownames(markers))) %>%
+      ggplot()+
+      geom_histogram(aes(x, stat(density)), bins=100)+
+      geom_line(aes(x, p, col=group)) +
+      xlab(names(expr)[i])+theme(legend.position = "none") +
+      scale_color_manual(values = scales::hue_pal()(nrow(markers)),
+                         drop = F)+
+      coord_trans(x = pwr_trans(1/2), y = pwr_trans(1/2))
+    
+  })
+  return(plot_grid(plotlist = pl))
+}
+
+
+
+p <-learnClasses(ms, expr)
+p <-interactive_learnClasses(ms, expr)
+
+
+
+
+
+
+
+
+# I need coord_trans, not scale_x_*.
+# Reason: with scale_x_sqrt, histogram bins
+# do not fit together with probability density function. 
+# Note that histograms require handling of negative x-values (probably
+# the left-most bin's coordinates), so you have to customize
+# your sqrt/power_transformation.
+data.frame(x=expr$PLP1,
+           scpr:::priors_geometric(ms, expr)) %>%
+  gather(Class, p, -x, factor_key = TRUE) %>%
+  group_by(Class) %>% mutate(pdf = mean(p) * scpr:::Lgamma(x,p)) %>%
+  ungroup() %>%
+ggplot() + 
+  geom_histogram(aes(x, stat(density)), bins = 1000) +
+  geom_line(aes(x, pdf, col = Class)) + 
+  coord_trans(x=pwr_trans(1/2), y = "sqrt2")
+
+
+# three_celltypes_2: first EM-iteration fits PLP1 such that Oligods
+# become "other" in the next steps.
+# Is this a practical problem of shape/rate estimation? Or
+# do some "other" cells express PLP1 highly, then this would be
+# a theoretical problem of having a marker-less class.
+
+# what's going wrong in five_celltypes? Look again now that you've
+# corrected em_histograms function (uses coord_trans now).
 
 
 
