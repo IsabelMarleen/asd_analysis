@@ -149,6 +149,8 @@ kernel_weights <- apply(nndists_cells,
 knn_list <- list()
 knn_smooth <- function(g = "SYT1"){
   # knn-smooth a gene with tricube weights.
+  # Returns normalized values of the form k/s/mean(1/s), where
+  # k are UMIs and s are a cell's total UMIs across all genes (aka library size).
   # Side effect: saves smoothing to knn_list so we don't have to recompute.
   if(is.null(knn_list[[g]])){ 
     norm_umis <- matrix(Ccounts[g, c(nn_cells)] / sfs[c(nn_cells)],
@@ -210,8 +212,14 @@ five_plusN_subtypes["eNeuron", "GAD1"] <- 0
 five_plusN_subtypes["eNeuron", c("SYT1","SATB2")] <- 1
 five_plusN_subtypes["other", "SATB2"] <- 0
 
+# leave out other:
+five_plusN_subtypes_noOther <- five_plusN_subtypes[-8,]
 
 
+# specify NRGN Neurons as well:
+five_and_threeNeurons <- cbind(five_plusN_subtypes_noOther, NRGN=0)
+five_and_threeNeurons <- rbind(five_and_threeNeurons,
+                               "nNeurons"=c(0,0,0,0,0,1,0,0,1))
 
 
 # Literature search (cumbersome) ------------------------------------------
@@ -240,6 +248,18 @@ genes_microglia <- c("CFH", "FCER1G", "TNIP2", "PTPRC_ENSG00000081237")
 
 # Classification ----------------------------------------------------------
 
+# plotting function:
+em_result_plot <- function(probs=p, ump =u[sel,], p_thresh = .5) {
+ p_umap <- ump %>%
+  bind_cols(class=apply(probs, 1, function(x)
+    ifelse(max(x) > p_thresh, colnames(probs)[which.max(x)], NA) )) %>%
+  mutate(class = factor(class, levels = colnames(probs))) %>%
+  ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) +
+  scale_color_manual(values = scales::hue_pal()(ncol(probs)),
+                     drop=F, na.value = "grey") 
+ return(p_umap)
+}
+
 # smooth and visualize (takes a while on first computation):
 data.frame(sapply(colnames(five_plusN_subtypes), knn_smooth)) %>%
   bind_cols(u) %>%
@@ -263,14 +283,21 @@ female_controls_pfc <- cellinfo$region=="PFC" &
 
 
 # set-up testbed:
-ms <- five_plusN
+# ms <- five_plusN
+ms <- five_and_threeNeurons
 expr <- data.frame(sapply(colnames(ms),
-                          knn_smooth) / sfs / mean(1/sfs) + .1/50)
+                          knn_smooth)  + .1/50)
 sel <- male_controls_pfc
 expr <- expr[sel,]
 
 
 p <-learnClasses(ms, expr)
+em_result_plot(p, p_thresh = .99)
+
+
+
+
+
 
 
 
