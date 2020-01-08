@@ -79,8 +79,22 @@ points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch="
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
+
+# Find nearest neighbors for UMAP and Louvain clustering:
 set.seed(100)
-u <- uwot::umap( pca$x, spread = 10, n_threads = 40) # euc: euclidean distance
+featureMatrix <- pca$x; k_nn <- 50
+annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
+for( i in 1:nrow(featureMatrix) ) 
+  annoy$addItem( i-1, featureMatrix[i,] )
+annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
+nn_cells <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
+nndists_cells <- sapply( 1:ncol(nn_cells), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn_cells[,j], ] )^2 ) ) )
+rm(featureMatrix, annoy)
+
+
+set.seed(100) # for reproducibility, we also have to set n_sgd_threads to 1.
+u <- uwot::umap( pca$x, spread = 10, n_threads = 1, n_sgd_threads=1,
+                 nn_method = list(idx=nn_cells, dist=nndists_cells)) 
 u <- as_tibble(u, .name_repair = ~ c("u1", "u2"))
 
 
@@ -101,18 +115,10 @@ ggplot() +
 
 
 # Louvain Clustering ------------------------------------------------------
-set.seed(100)
-featureMatrix <- pca$x; k_nn <- 50
-annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
-for( i in 1:nrow(featureMatrix) ) 
-  annoy$addItem( i-1, featureMatrix[i,] )
-annoy$build( 50 ) # builds a forest  of n_trees trees. More trees gives higher precision when querying.
-nn_cells <- t( sapply( 1:annoy$getNItems(), function(i) annoy$getNNsByItem( i-1, k_nn) + 1 ) )
-nndists_cells <- sapply( 1:ncol(nn_cells), function(j) sqrt( rowSums( ( featureMatrix - featureMatrix[ nn_cells[,j], ] )^2 ) ) )
-rm(featureMatrix, annoy)
 
+# We use the approximate nearest neighbors computed above.
 
-# has to be sparse, otherwise takes 80 GB of RAM:
+# matrix has to be sparse, otherwise takes 80 GB of RAM:
 adj <- Matrix(0, nrow = nrow(pca$x), ncol = nrow(pca$x)) 
 for(i in 1:ncol(nn_cells))
   adj[ cbind(1:nrow(pca$x), nn_cells[, i]) ] <- 1
