@@ -293,12 +293,14 @@ female_controls_pfc <- cellinfo$region=="PFC" &
 ms <- five_and_threeNeurons
 expr <- data.frame(sapply(colnames(ms),
                           knn_smooth)  + .1/50)
-sel <- male_controls_pfc
+sel <- TRUE # take ALL cells, i.e. 104k
+# sel <- male_controls_pfc
 expr <- expr[sel,]
 
 
 p <-learnClasses(ms, expr)
-em_result_plot(p, p_thresh = .99)
+p_bak <- p
+em_result_plot(p, p_thresh = .5)
 
 
 
