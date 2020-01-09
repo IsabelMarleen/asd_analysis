@@ -302,10 +302,64 @@ p <-learnClasses(ms, expr)
 p_bak <- p
 em_result_plot(p, p_thresh = .5)
 
+plot_grid(
+  em_result_plot(scpr:::priors_geometric(ms, expr), p_thres = .5) + ggtitle("initial probs, p > .5"),
+  em_result_plot(p_bak, p_thres = .5) + ggtitle("EM result, p>.5"),
+  em_result_plot(p_bak, p_thres = .99) + ggtitle("EM result, p>.99"),
+  em_result_plot(p[,-9], p_thresh = .99) + ggtitle("EM, add 'NA' class, run 1 iteration. p>.99")
+)
 
 
 
+# Number of DEGs ----------------------------------------------------------
 
+
+
+class.5 <- factor(apply(p_bak, 1, function(x) ifelse(max(x) > .5,
+                                       colnames(p_bak)[which.max(x)],
+                                       NA) ))
+class.99 <- factor(apply(p_bak, 1, function(x) ifelse(max(x) > .99,
+                                       colnames(p_bak)[which.max(x)],
+                                       NA) ))
+cluster_simplified <- case_when(paper_clusters %in% c("excit_layers", "Neu-mat") ~ "eNeuron",
+                                TRUE ~ as.character(paper_clusters)) %>% factor
+
+clusterumap <- function(cluster_factor) u %>% bind_cols(cl=cluster_factor) %>%
+  ggplot(aes(u1, u2, col=cl))+
+  geom_point(size=.3)+ coord_fixed()
+plot_grid(clusterumap(cluster_simplified)+ggtitle("Paper Clusters"),
+          clusterumap(class.5) + ggtitle("EM p>.5"),
+          clusterumap(class.99) + ggtitle("EM p>.99") )
+
+# options:
+
+fac <- class.99
+
+pseudobulks <- as.matrix(t( fac2sparse(interaction(fac, cellinfo$sample)) %*% t(Ccounts) ))
+run_deseq <- function(fac) {
+  sapply(levels(fac), function(class) {
+    pbulk <- pseudobulks[, grepl(class, colnames(pseudobulks))]
+    
+    coldat <- data.frame(sample=sub(".*\\.","", colnames(pbulk), ""), stringsAsFactors = F) %>% left_join(sampleTable)  %>%
+      mutate(individual = factor(individual),
+             diagnosis = factor(diagnosis, levels = c("Control", "ASD")),
+             sex = factor(sex), 
+             region    = factor(region))
+    rownames(coldat) <- paste(class, coldat$sample, sep = ".")
+    
+    dds <- DESeq2::DESeqDataSetFromMatrix( pbulk,
+                                           coldat[colnames(pbulk), ],
+                                           design = ~ sex + region + age + diagnosis )
+    dds <- DESeq2::DESeq(dds, 
+                         parallel=TRUE, BPPARAM=BiocParallel::MulticoreParam(20))
+    res_df <- DESeq2::results(dds, name = "diagnosis_ASD_vs_Control") %>% as.data.frame() %>% rownames_to_column("Gene")
+    res_df$padj
+  })
+}
+
+res50 <- run_deseq(class.5)
+res99 <- run_deseq(class.99)
+resCl <- run_deseq(cluster_simplified)
 
 
 
