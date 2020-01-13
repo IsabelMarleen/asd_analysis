@@ -75,13 +75,13 @@ is_expressed <- colSums( Tcounts != 0 ) > 100
 is_informative <- gene_vars/gene_means > 1.5 * poisson_vmr  &  is_expressed
 plot(gene_means, gene_vars/gene_means, pch=".", log = "xy")
 points(gene_means[is_informative], (gene_vars/gene_means)[is_informative], pch=".", col = "red" )
-
+set.seed(100) # seed ensures that UMAP gives reproducible result
 pca <- irlba::prcomp_irlba( x = sqrt(t(norm_counts[is_informative,])),
                             n = 40,
                             scale. = TRUE)
 
 # Find nearest neighbors for UMAP and Louvain clustering:
-set.seed(100)
+set.seed(100) # seed ensures that UMAP gives reproducible result
 featureMatrix <- pca$x; k_nn <- 50
 annoy <- new( AnnoyEuclidean, ncol(featureMatrix) )
 for( i in 1:nrow(featureMatrix) ) 
