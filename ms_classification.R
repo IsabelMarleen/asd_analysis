@@ -217,7 +217,7 @@ data.frame(sapply(colnames(major_celltypes), knn_smooth)) %>%
 # set-up testbed:
 ms <- major_celltypes
 expr <- data.frame(sapply(colnames(ms),
-                          knn_smooth)  + .1/50)
+                          knn_smooth)  + .1/50)  # +.1/50 avoids zeros
 sel <- TRUE # take ALL cells, i.e. 104k
 # sel <- male_controls_pfc
 expr <- expr[sel,]
@@ -226,6 +226,90 @@ expr <- expr[sel,]
 p <-learnClasses(ms, expr)
 p_bak <- p
 em_result_plot(p, p_thresh = .5)
+
+
+
+
+
+
+
+# manual EM ---------------------------------------------------------------
+
+marker_table <- ms
+expr_table <- expr
+
+# number of iterations:
+iter = 0
+maxiter = 1000
+# other housekeeping:
+loglik = rep(-Inf, nrow(marker_table))
+delta = +Inf
+tolerance = 0.001
+miniter = 50
+
+# initialize p
+
+p <- scpr:::priors_geometric(marker_table, expr_table)
+logp <- log(p)
+
+while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
+  
+  p <- pmax(exp(logp), 1e-05)
+  p <- p/rowSums(p)
+  logp <- sapply(1:nrow(marker_table), function(class) {
+    loglik_mat <- sapply(1:ncol(marker_table), function(gene) {
+      probs <- p[, class]
+      return(scpr:::Lgamma(expr_table[, gene], probs, 
+                           log = T))
+    })
+    log(mean(p[, class])) + rowSums(loglik_mat)
+  })
+  logp <- logp - log(rowSums(exp(logp)))
+  loglikOld = loglik
+  loglik <- colSums(logp)
+  delta <- max(abs(loglikOld - loglik))
+  iter = iter + 1
+}
+p <- exp(logp)
+colnames(p) <- rownames(marker_table)
+
+
+
+
+
+
+
+scale_hist <- function(x = expr[, "SYT1"], red_class = "eNeuron"){
+ggplot() +
+  geom_histogram(data = data.frame(Gene = x),
+                 aes(Gene, stat(density)), bins=100)+
+  scale_x_log10(limits = c(min(x), max(x))) +
+  # add all classes (dashed):
+  lapply(as.data.frame(p), function(ps){
+    param <- scpr::mom_gamma(x, ps)
+    geom_density(data=data.frame(theo = rgamma(10000, param[1], param[2])),
+                 aes(theo, mean(ps)*stat(density)), linetype = "dashed")})  +
+  # emphasize class in red:
+  geom_density(
+    data=data.frame(theo = rgamma(10000,
+                                  scpr::mom_gamma(x, p[, red_class])[1],
+                                  scpr::mom_gamma(x, p[, red_class])[2])),
+    mapping = aes(theo, mean(p[,red_class])*stat(density)), col = "red") 
+}
+
+
+
+scale_hist(expr[,"SYT1"], "eNeuron")
+
+
+
+
+
+
+
+
+
+
 
 
 
