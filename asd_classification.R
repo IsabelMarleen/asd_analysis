@@ -130,6 +130,18 @@ cl_louvain <- factor(cl_louvain$membership)
 
 
 
+
+
+# savepoint ---------------------------------------------------------------
+
+
+# Load data above (counts, Tcounts, etc.), then these RDS files:
+# save(list=c("nn_cells","nndists_cells","u","cl_louvain",
+#             "paper_clusters","sfs"),
+#      file = "~/sds/sd17l002/p/ASD/savepoint/january2020_nn_umap_clusters_sfs.RData")
+load("~/sds/sd17l002/p/ASD/savepoint/january2020_nn_umap_clusters_sfs.RData")
+
+
 # set up smoothing --------------------------------------------
 
 
