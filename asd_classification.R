@@ -317,8 +317,7 @@ em_result_plot(p, p_thresh = .5)
 plot_grid(
   em_result_plot(scpr:::priors_geometric(ms, expr), p_thres = .5) + ggtitle("initial probs, p > .5"),
   em_result_plot(p_bak, p_thres = .5) + ggtitle("EM result, p>.5"),
-  em_result_plot(p_bak, p_thres = .99) + ggtitle("EM result, p>.99"),
-  em_result_plot(p[,-9], p_thresh = .99) + ggtitle("EM, add 'NA' class, run 1 iteration. p>.99")
+  em_result_plot(p_bak, p_thres = .99) + ggtitle("EM result, p>.99")
 )
 
 
@@ -343,12 +342,11 @@ plot_grid(clusterumap(cluster_simplified)+ggtitle("Paper Clusters"),
           clusterumap(class.5) + ggtitle("EM p>.5"),
           clusterumap(class.99) + ggtitle("EM p>.99") )
 
-# options:
 
-fac <- class.99
 
-pseudobulks <- as.matrix(t( fac2sparse(interaction(fac, cellinfo$sample)) %*% t(Ccounts) ))
+
 run_deseq <- function(fac) {
+pseudobulks <- as.matrix(t( fac2sparse(interaction(fac, cellinfo$sample)) %*% t(Ccounts) ))
   sapply(levels(fac), function(class) {
     pbulk <- pseudobulks[, grepl(class, colnames(pseudobulks))]
     
