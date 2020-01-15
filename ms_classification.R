@@ -282,8 +282,7 @@ table(na=is.na(classes), treat = cellinfo$diagnosis)
 
 
 
-# -ncol(p) excludes "other" class
-scale_hist <- function(x = expr[, "SYT1"], probs=p[, -ncol(p)], highlight = "eNeuron"){
+scale_hist <- function(x = expr[, "SYT1"], probs=p, highlight = "eNeuron"){
 ggplot() +
   geom_histogram(data = data.frame(Gene = x),
                  aes(Gene, stat(density)), bins=100)+
