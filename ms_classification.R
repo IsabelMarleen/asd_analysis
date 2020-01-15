@@ -248,10 +248,7 @@ tolerance = 0.001
 miniter = 10
 
 # initialize p
-
 p <- scpr:::priors_geometric(marker_table, expr_table)
-# add "other" group and normalize to 1:
-p <- cbind(p, other=.1); p <- p/rowSums(p)
 logp <- log(p)
 
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
