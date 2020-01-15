@@ -201,7 +201,7 @@ em_result_plot <- function(probs=p, ump =u[sel,], p_thresh = .5) {
       ifelse(max(x) > p_thresh, colnames(probs)[which.max(x)], NA) )) %>%
     mutate(class = factor(class, levels = colnames(probs))) %>%
     ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) + coord_fixed() +
-    scale_color_manual(values = c(scales::hue_pal()(ncol(probs)-1), "black"),
+    scale_color_manual(values = scales::hue_pal()(ncol(probs)),
                        drop=F, na.value = "grey") 
   return(p_umap)
 }
@@ -242,10 +242,10 @@ expr_table <- expr
 iter = 0
 maxiter = 1000
 # other housekeeping:
-loglik = rep(-Inf, nrow(marker_table)+1) # +1 for other-group
+loglik = rep(-Inf, nrow(marker_table)) 
 delta = +Inf
 tolerance = 0.001
-miniter = 20
+miniter = 10
 
 # initialize p
 
@@ -257,7 +257,7 @@ logp <- log(p)
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
   
   p <- pmax(exp(logp), 1e-05)
-  p <- p/rowSums(p)
+  p <- p/(rowSums(p)+1)
   logp <- sapply(1:nrow(marker_table), function(class) {
     loglik_mat <- sapply(1:ncol(marker_table), function(gene) {
       probs <- p[, class]
@@ -266,26 +266,22 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
-  # add "other" group:
-  # other <- sapply(1:ncol(marker_table), function(gene) {
-  #   probs <- p[, ncol(p)] # other is always in last column
-  #   x <- expr_table[, gene]
-  #   dunif(x, min=0, max=max(x), log=T)
-  # })
-  # logp <- cbind(logp, log(mean(p[, ncol(p)])) + rowSums(other) )
-  logp <- cbind(logp, log(mean(p[, ncol(p)])) + log(.1))
-  
-  logp <- logp - log(rowSums(exp(logp)))
+  logp <- logp - log(rowSums(exp(logp))+1)
   loglikOld = loglik
   loglik <- colSums(logp)
   delta <- max(abs(loglikOld - loglik))
   iter = iter + 1
 }
 p <- exp(logp)
-colnames(p) <- c(rownames(marker_table), "other")
+colnames(p) <- rownames(marker_table)
 
-plot_grid(em_result_plot(p_init), em_result_plot(p))
 
+# seems like we are excluding doublets. Still, 90 % of
+# excluded cells come from MS, which is clearly artificial and
+# needs more work:
+classes <- apply(p1, 1, function(x) 
+  ifelse(max(x) > .5, colnames(p1)[which.max(x)], NA) )
+table(na=is.na(classes), treat = cellinfo$diagnosis)
 
 
 
