@@ -255,7 +255,7 @@ logp <- log(p)
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
   
   p <- pmax(exp(logp), 1e-05)
-  p <- p/(rowSums(p)+.1)
+  p <- p/(rowSums(p)+1)
   logp <- sapply(1:nrow(marker_table), function(class) {
     loglik_mat <- sapply(1:ncol(marker_table), function(gene) {
       probs <- p[, class]
@@ -264,7 +264,7 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
-  logp <- logp - log(rowSums(exp(logp))+.1)
+  logp <- logp - log(rowSums(exp(logp))+1)
   loglikOld = loglik
   loglik <- colSums(logp)
   delta <- max(abs(loglikOld - loglik))
@@ -274,8 +274,12 @@ p <- exp(logp)
 colnames(p) <- rownames(marker_table)
 
 
-
-
+# seems like we are excluding doublets. Still, 90 % of
+# excluded cells come from MS, which is clearly artificial and
+# needs more work:
+classes <- apply(p1, 1, function(x) 
+  ifelse(max(x) > .5, colnames(p1)[which.max(x)], NA) )
+table(na=is.na(classes), treat = cellinfo$diagnosis)
 
 
 
