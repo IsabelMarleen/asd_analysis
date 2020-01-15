@@ -242,14 +242,16 @@ expr_table <- expr
 iter = 0
 maxiter = 1000
 # other housekeeping:
-loglik = rep(-Inf, nrow(marker_table))
+loglik = rep(-Inf, nrow(marker_table)+1) # +1 for other-group
 delta = +Inf
 tolerance = 0.001
-miniter = 50
+miniter = 20
 
 # initialize p
 
 p <- scpr:::priors_geometric(marker_table, expr_table)
+# add "other" group and normalize to 1:
+p <- cbind(p, other=.1); p <- p/rowSums(p)
 logp <- log(p)
 
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
@@ -264,6 +266,15 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
+  # add "other" group:
+  # other <- sapply(1:ncol(marker_table), function(gene) {
+  #   probs <- p[, ncol(p)] # other is always in last column
+  #   x <- expr_table[, gene]
+  #   dunif(x, min=0, max=max(x), log=T)
+  # })
+  # logp <- cbind(logp, log(mean(p[, ncol(p)])) + rowSums(other) )
+  logp <- cbind(logp, log(mean(p[, ncol(p)])) + log(.1))
+  
   logp <- logp - log(rowSums(exp(logp)))
   loglikOld = loglik
   loglik <- colSums(logp)
@@ -271,35 +282,35 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
   iter = iter + 1
 }
 p <- exp(logp)
-colnames(p) <- rownames(marker_table)
+colnames(p) <- c(rownames(marker_table), "other")
+
+plot_grid(em_result_plot(p_init), em_result_plot(p))
 
 
 
 
-
-
-
-scale_hist <- function(x = expr[, "SYT1"], red_class = "eNeuron"){
+# -ncol(p) excludes "other" class
+scale_hist <- function(x = expr[, "SYT1"], probs=p[, -ncol(p)], highlight = "eNeuron"){
 ggplot() +
   geom_histogram(data = data.frame(Gene = x),
                  aes(Gene, stat(density)), bins=100)+
   scale_x_log10(limits = c(min(x), max(x))) +
   # add all classes (dashed):
-  lapply(as.data.frame(p), function(ps){
+  lapply(as.data.frame(probs), function(ps){
     param <- scpr::mom_gamma(x, ps)
     geom_density(data=data.frame(theo = rgamma(10000, param[1], param[2])),
                  aes(theo, mean(ps)*stat(density)), linetype = "dashed")})  +
   # emphasize class in red:
   geom_density(
     data=data.frame(theo = rgamma(10000,
-                                  scpr::mom_gamma(x, p[, red_class])[1],
-                                  scpr::mom_gamma(x, p[, red_class])[2])),
-    mapping = aes(theo, mean(p[,red_class])*stat(density)), col = "red") 
+                                  scpr::mom_gamma(x, probs[, highlight])[1],
+                                  scpr::mom_gamma(x, probs[, highlight])[2])),
+    mapping = aes(theo, mean(probs[,highlight])*stat(density)), col = "red") 
 }
 
 
 
-scale_hist(expr[,"SYT1"], "eNeuron")
+scale_hist(expr[,"SYT1"], highlight = "eNeuron")
 
 
 
