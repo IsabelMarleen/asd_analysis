@@ -181,7 +181,7 @@ knn_smooth <- function(g = "SYT1"){
 major_celltypes <- matrix(0, ncol=9, nrow=8); diag(major_celltypes) <- 1
 dimnames(major_celltypes) <- list(Class = c("Oligod", "OPC", "Astrocyte",
                                               "Microglia", "endo",
-                                              "nNeuron","eNeuron", "iNeuron" ),
+                                              "nNeuron","iNeuron", "eNeuron" ),
                                     Gene  = c("PLP1", "TNR", "AQP4", 
                                               "PTPRC_ENSG00000081237",
                                               "VWF", "SYT1", "GAD1", "SATB2", "NRGN"))
@@ -201,7 +201,7 @@ em_result_plot <- function(probs=p, ump =u[sel,], p_thresh = .5) {
       ifelse(max(x) > p_thresh, colnames(probs)[which.max(x)], NA) )) %>%
     mutate(class = factor(class, levels = colnames(probs))) %>%
     ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) + coord_fixed() +
-    scale_color_manual(values = scales::hue_pal()(ncol(probs)),
+    scale_color_manual(values = c(scales::hue_pal()(ncol(probs)-1), "black"),
                        drop=F, na.value = "grey") 
   return(p_umap)
 }
@@ -235,7 +235,7 @@ em_result_plot(p, p_thresh = .5)
 
 # manual EM ---------------------------------------------------------------
 
-marker_table <- ms
+marker_table <- major_celltypes
 expr_table <- expr
 
 # number of iterations:
