@@ -245,7 +245,7 @@ maxiter = 1000
 loglik = rep(-Inf, nrow(marker_table))
 delta = +Inf
 tolerance = 0.001
-miniter = 50
+miniter = 10
 
 # initialize p
 
@@ -255,7 +255,7 @@ logp <- log(p)
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
   
   p <- pmax(exp(logp), 1e-05)
-  p <- p/rowSums(p)
+  p <- p/(rowSums(p)+.1)
   logp <- sapply(1:nrow(marker_table), function(class) {
     loglik_mat <- sapply(1:ncol(marker_table), function(gene) {
       probs <- p[, class]
@@ -264,7 +264,7 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
-  logp <- logp - log(rowSums(exp(logp)))
+  logp <- logp - log(rowSums(exp(logp))+.1)
   loglikOld = loglik
   loglik <- colSums(logp)
   delta <- max(abs(loglikOld - loglik))
