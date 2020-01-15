@@ -201,7 +201,7 @@ em_result_plot <- function(probs=p, ump =u[sel,], p_thresh = .5) {
       ifelse(max(x) > p_thresh, colnames(probs)[which.max(x)], NA) )) %>%
     mutate(class = factor(class, levels = colnames(probs))) %>%
     ggplot(aes(u1, u2, col = class)) + geom_point(size=.5) + coord_fixed() +
-    scale_color_manual(values = c(scales::hue_pal()(ncol(probs)-1), "black"),
+    scale_color_manual(values = scales::hue_pal()(ncol(probs)),
                        drop=F, na.value = "grey") 
   return(p_umap)
 }
