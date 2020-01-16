@@ -194,6 +194,10 @@ major_celltypes["nNeuron", "NRGN"] <- 1
 
 # Classification ----------------------------------------------------------
 
+
+get_expr <- function(marker_table)        # +.1/50 avoids zeros
+  data.frame(sapply(colnames(marker_table), knn_smooth) + .1/50)
+
 # plotting function:
 em_result_plot <- function(probs=p, ump =u[sel,], p_thresh = .5) {
   p_umap <- ump %>%
@@ -250,11 +254,12 @@ miniter = 10
 # initialize p
 p <- scpr:::priors_geometric(marker_table, expr_table)
 logp <- log(p)
+o <- 1
 
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
-  
+  print(iter) 
   p <- pmax(exp(logp), 1e-05)
-  p <- p/(rowSums(p)+1)
+  p <- p/(rowSums(p)+o)
   logp <- sapply(1:nrow(marker_table), function(class) {
     loglik_mat <- sapply(1:ncol(marker_table), function(gene) {
       probs <- p[, class]
@@ -263,7 +268,7 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
-  logp <- logp - log(rowSums(exp(logp))+1)
+  logp <- logp - log(rowSums(exp(logp))+o)
   loglikOld = loglik
   loglik <- colSums(logp)
   delta <- max(abs(loglikOld - loglik))
