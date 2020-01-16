@@ -253,13 +253,11 @@ miniter = 10
 
 # initialize p
 p <- scpr:::priors_geometric(marker_table, expr_table)
-logp <- log(p)
 o <- 1
 
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
-  print(iter) 
-  p <- pmax(exp(logp), 1e-05)
-  p <- p/(rowSums(p)+o)
+  if(iter %% 5 == 0){print(iter)}
+
   logp <- sapply(1:nrow(marker_table), function(class) {
     loglik_mat <- sapply(1:ncol(marker_table), function(gene) {
       probs <- p[, class]
@@ -268,7 +266,12 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
+  # normalize to probabilities:
   logp <- logp - log(rowSums(exp(logp))+o)
+  # p is used to compute logp in next iteration. We add a small number to
+  # numerical zeros and then normalize again:
+  p <- pmax(exp(logp), 1e-05)
+  p <- p/(rowSums(p)+o)  # correct for adding 1e-05 to some
   loglikOld = loglik
   loglik <- colSums(logp)
   delta <- max(abs(loglikOld - loglik))
