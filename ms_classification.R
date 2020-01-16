@@ -190,6 +190,9 @@ major_celltypes["nNeuron", "NRGN"] <- 1
 
 
 
+three_celltypes <- matrix(0, ncol=3, nrow=3); diag(three_celltypes) <- 1
+dimnames(three_celltypes) <- list(Class = c("Oligod", "OPC", "Astrocyte"),
+                                  Gene  = c("PLP1", "TNR", "AQP4"))
 
 
 # Classification ----------------------------------------------------------
@@ -240,7 +243,10 @@ em_result_plot(p, p_thresh = .5)
 # manual EM ---------------------------------------------------------------
 
 marker_table <- major_celltypes
-expr_table <- expr
+expr_table <- get_expr(marker_table)
+p <- scpr:::priors_geometric(marker_table, expr_table)
+
+
 
 # number of iterations:
 iter = 0
@@ -251,9 +257,7 @@ delta = +Inf
 tolerance = 0.001
 miniter = 10
 
-# initialize p
-p <- scpr:::priors_geometric(marker_table, expr_table)
-o <- 1
+
 
 while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
   if(iter %% 5 == 0){print(iter)}
@@ -266,6 +270,10 @@ while ((delta > tolerance) && (iter <= maxiter) || (iter < miniter)) {
     })
     log(mean(p[, class])) + rowSums(loglik_mat)
   })
+  
+  # o is picked such that 15 % of cells will have p<.5 for all classes:
+  o <- quantile( apply(exp(logp), 1, max),  .15)
+  
   # normalize to probabilities:
   logp <- logp - log(rowSums(exp(logp))+o)
   # p is used to compute logp in next iteration. We add a small number to
@@ -284,10 +292,30 @@ colnames(p) <- rownames(marker_table)
 # seems like we are excluding doublets. Still, 90 % of
 # excluded cells come from MS, which is clearly artificial and
 # needs more work:
-classes <- apply(p1, 1, function(x) 
-  ifelse(max(x) > .5, colnames(p1)[which.max(x)], NA) )
+classes <- apply(p, 1, function(x) 
+  ifelse(max(x) > .5, colnames(p)[which.max(x)], NA) )
 table(na=is.na(classes), treat = cellinfo$diagnosis)
 
+
+# p_0: o=0 in above code
+# p_1: o is hardcoded to 1 in above code
+# p10: o is  quantile( apply(exp(logp), 1, max),  .15)
+
+plot_grid(
+  ggplot() +
+    geom_point(data = u %>% bind_cols(paper_clusters = paper_clusters),
+               aes(u1, u2, col = paper_clusters), size=.5) + coord_fixed() +
+    geom_label(data = u %>% bind_cols(paper_clusters = paper_clusters) %>%
+                 group_by(paper_clusters) %>% summarise(u1=mean(u1), u2=mean(u2)),
+               aes(u1, u2, label = paper_clusters)) + #theme(legend.position = "none") +
+    ggtitle("Clusters from Nature paper (simplified)") +
+    # colors differ from other 3 plots, so make them less intense:
+    scale_color_manual(values = scales::hue_pal(c=50)(nlevels(paper_clusters)),
+                       drop=F, na.value = "grey"),
+  em_result_plot(p_0) + ggtitle("o=0 (unregularized EM)"),
+  em_result_plot(p_1) + ggtitle("o=1"),
+  em_result_plot(p10) + ggtitle("o is the 10%-quantile of max(p(x|c)p(c))")
+)
 
 
 scale_hist <- function(x = expr[, "SYT1"], probs=p, highlight = "eNeuron"){
