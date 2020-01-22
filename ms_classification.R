@@ -239,6 +239,28 @@ em_result_plot(p, p_thresh = .5)
 
 
 
+# export for experiments --------------------------------------------------
+
+
+ms_smoothedMarkers <- sapply(c(colnames(major_celltypes),
+                               "RBFOX3", "GAD2", "THY1"), knn_smooth)
+
+ms_markertable <- major_celltypes
+
+ms_markertable_multiplegenes <- cbind(major_celltypes,
+                                   RBFOX3=major_celltypes[, "SYT1"],
+                                   GAD2  =major_celltypes[, "GAD1"],
+                                   THY1  =major_celltypes[, "NRGN"]
+                                   )
+
+data_path <- "~/sds/sd17l002/p/MS/savepoint/data_for_expectation_maximisation/"
+write_rds(paper_clusters,    paste0(data_path, "ms_paperClusters.rds"))
+write_rds(ms_smoothedMarkers,paste0(data_path, "ms_smoothedMarkers.rds"))
+write_rds(ms_markertable,    paste0(data_path, "ms_markertable.rds"))
+write_rds(ms_markertable_multiplegenes, paste0(data_path,"ms_markertable_mulitplegenes.rds"))
+
+
+
 
 # manual EM ---------------------------------------------------------------
 
