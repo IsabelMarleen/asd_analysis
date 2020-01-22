@@ -264,6 +264,48 @@ genes_astro <- c("GFAP", "S100B", "ALDOC", "AQP4")
 genes_microglia <- c("CFH", "FCER1G", "TNIP2", "PTPRC_ENSG00000081237")
 
 
+
+
+# export for experiments --------------------------------------------------
+
+major_celltypes <- matrix(0, ncol=9, nrow=8); diag(major_celltypes) <- 1
+dimnames(major_celltypes) <- list(Class = c("Oligod", "OPC", "Astrocyte",
+                                            "Microglia", "endo",
+                                            "nNeuron","iNeuron", "eNeuron" ),
+                                  Gene  = c("PLP1", "TNR", "AQP4", 
+                                            "PTPRC_ENSG00000081237",
+                                            "VWF", "SYT1", "GAD1", "SATB2", "NRGN"))
+major_celltypes[c("eNeuron","iNeuron"), "SYT1"] <- 1
+major_celltypes["nNeuron", "NRGN"] <- 1
+
+
+
+asd_smoothedMarkers <- sapply(c(colnames(major_celltypes),
+                             "RBFOX3", "GAD2", "THY1"), knn_smooth)
+
+asd_markertable <- major_celltypes
+
+asd_markertable_multiplegenes <- cbind(major_celltypes,
+                                      RBFOX3=major_celltypes[, "SYT1"],
+                                      GAD2  =major_celltypes[, "GAD1"],
+                                      THY1  =major_celltypes[, "NRGN"]
+)
+
+data_path <- "~/sds/sd17l002/p/ASD/savepoint/data_for_expectation_maximisation/"
+write_rds(paper_clusters,    paste0(data_path, "asd_paperClusters.rds"))
+write_rds(asd_smoothedMarkers,paste0(data_path, "asd_smoothedMarkers.rds"))
+write_rds(asd_markertable,    paste0(data_path, "asd_markertable.rds"))
+write_rds(asd_markertable_multiplegenes, paste0(data_path,"asd_markertable_mulitplegenes.rds"))
+
+
+
+
+
+
+
+
+
+
 # Classification ----------------------------------------------------------
 
 # plotting function:
