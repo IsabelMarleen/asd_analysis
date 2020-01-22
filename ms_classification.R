@@ -255,6 +255,7 @@ ms_markertable_multiplegenes <- cbind(major_celltypes,
 
 data_path <- "~/sds/sd17l002/p/MS/savepoint/data_for_expectation_maximisation/"
 write_rds(paper_clusters,    paste0(data_path, "ms_paperClusters.rds"))
+write_rds(u,    paste0(data_path, "ms_umap.rds"))
 write_rds(ms_smoothedMarkers,paste0(data_path, "ms_smoothedMarkers.rds"))
 write_rds(ms_markertable,    paste0(data_path, "ms_markertable.rds"))
 write_rds(ms_markertable_multiplegenes, paste0(data_path,"ms_markertable_mulitplegenes.rds"))

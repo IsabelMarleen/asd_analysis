@@ -293,6 +293,7 @@ asd_markertable_multiplegenes <- cbind(major_celltypes,
 
 data_path <- "~/sds/sd17l002/p/ASD/savepoint/data_for_expectation_maximisation/"
 write_rds(paper_clusters,    paste0(data_path, "asd_paperClusters.rds"))
+write_rds(u,    paste0(data_path, "asd_umap.rds"))
 write_rds(asd_smoothedMarkers,paste0(data_path, "asd_smoothedMarkers.rds"))
 write_rds(asd_markertable,    paste0(data_path, "asd_markertable.rds"))
 write_rds(asd_markertable_multiplegenes, paste0(data_path,"asd_markertable_mulitplegenes.rds"))
